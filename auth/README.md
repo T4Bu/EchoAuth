@@ -36,119 +36,92 @@ A robust, secure authentication service built with Go, featuring account managem
 - Redis 6 or higher
 - Docker (optional, for containerization)
 
-## Configuration
+## Development
 
-The service uses environment variables for configuration. Create a `.env` file in the root directory:
+### Quick Start with Docker
 
-```env
-PORT=8080
-DATABASE_URL=host=localhost user=postgres password=postgres dbname=auth_db port=5432 sslmode=disable
-JWT_SECRET=your-super-secret-key-change-this-in-production
+1. Copy the example environment file:
+   ```bash
+   cp .env.example .env
+   ```
 
-# Redis Configuration
-REDIS_ADDR=localhost:6379
-REDIS_PASSWORD=
-# REDIS_DB=0 (using default)
+2. Start the development environment:
+   ```bash
+   docker compose -f docker-compose.dev.yml up -d
+   ```
 
-# SMTP Configuration (for email notifications)
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USERNAME=your-email@gmail.com
-SMTP_PASSWORD=your-app-specific-password
-SMTP_FROM=noreply@yourdomain.com
+Features:
+- Hot-reload using Air (automatic rebuilds on code changes)
+- Mounted source code for live editing
+- Cached Go modules
+- Isolated development databases
 
-# Logging Configuration
-ENV=development
-LOG_LEVEL=debug
+### Development Services
+
+- Auth Service: http://localhost:8080
+- PostgreSQL: localhost:5432
+- Redis: localhost:6379
+- Grafana: http://localhost:3000 (admin/admin)
+- Prometheus: http://localhost:9090
+
+### Useful Commands
+
+```bash
+# View logs
+docker compose -f docker-compose.dev.yml logs -f auth
+
+# Access container shell
+docker compose -f docker-compose.dev.yml exec auth sh
+
+# Run tests
+docker compose -f docker-compose.test.yml up -d
+go test ./...
+
+# Stop environment
+docker compose -f docker-compose.dev.yml down
 ```
 
-## Installation
+## API Documentation
 
-1. Clone the repository:
-   ```bash
-   git clone <repository-url>
-   cd auth
-   ```
+### Authentication Endpoints
 
-2. Install dependencies:
-   ```bash
-   go mod download
-   ```
+- POST `/auth/register`
+  ```json
+  {
+    "email": "user@example.com",
+    "password": "SecurePass123!",
+    "first_name": "John",
+    "last_name": "Doe"
+  }
+  ```
 
-3. Set up the database:
-   ```bash
-   # Using Docker
-   docker-compose up -d postgres redis
-   
-   # Or manually create a PostgreSQL database named 'auth_db'
-   ```
+- POST `/auth/login`
+  ```json
+  {
+    "email": "user@example.com",
+    "password": "SecurePass123!"
+  }
+  ```
 
-4. Run migrations:
-   ```bash
-   # The service will automatically run migrations on startup
-   ```
-
-5. Start the service:
-   ```bash
-   go run cmd/main.go
-   ```
-
-## API Endpoints
-
-### Authentication
-
-#### Register User
-```http
-POST /auth/register
-Content-Type: application/json
-
-{
-  "email": "user@example.com",
-  "password": "SecurePass123!",
-  "first_name": "John",
-  "last_name": "Doe"
-}
-```
-
-#### Login
-```http
-POST /auth/login
-Content-Type: application/json
-
-{
-  "email": "user@example.com",
-  "password": "SecurePass123!"
-}
-```
-
-#### Logout
-```http
-POST /auth/logout
-Authorization: Bearer <token>
-```
+- POST `/auth/logout`
+  - Requires JWT token in Authorization header
 
 ### Password Reset
 
-#### Request Reset Token
-```http
-POST /auth/reset-password/request
-Content-Type: application/json
+- POST `/auth/reset-password/request`
+  ```json
+  {
+    "email": "user@example.com"
+  }
+  ```
 
-{
-  "email": "user@example.com"
-}
-```
-
-#### Reset Password
-```http
-POST /auth/reset-password/reset
-Content-Type: application/json
-
-{
-  "token": "reset-token",
-  "new_password": "NewSecurePass123!"
-}
-```
+- POST `/auth/reset-password/reset`
+  ```json
+  {
+    "token": "reset-token",
+    "new_password": "NewSecurePass123!"
+  }
+  ```
 
 ### Health Check
 
@@ -156,20 +129,37 @@ Content-Type: application/json
 GET /health
 ```
 
-## Testing
+## Configuration
 
-Run the test suite:
+The service is configured via environment variables:
 
 ```bash
-# Run all tests
-go test ./...
+# Server
+PORT=8080
+ENV=development
 
-# Run tests with coverage
-go test -cover ./...
+# Database
+DB_HOST=postgres
+DB_PORT=5432
+DB_USER=postgres
+DB_PASSWORD=postgres
+DB_NAME=auth_db
 
-# Run integration tests
-docker-compose -f docker-compose.test.yml up -d
-INTEGRATION_TEST=true go test ./...
+# Redis
+REDIS_HOST=redis
+REDIS_PORT=6379
+
+# JWT
+JWT_SECRET=your-secret-key
+JWT_EXPIRY=24h
+
+# Rate Limiting
+RATE_LIMIT=100
+RATE_LIMIT_WINDOW=60
+
+# Email (Development)
+SMTP_HOST=mailhog
+SMTP_PORT=1025
 ```
 
 ## Security Considerations
@@ -192,7 +182,7 @@ INTEGRATION_TEST=true go test ./...
    - Secure token validation
    - Token blacklisting on logout
 
-## Metrics
+## Monitoring
 
 The service exposes Prometheus metrics at `/metrics`, including:
 - Authentication attempts
@@ -200,6 +190,7 @@ The service exposes Prometheus metrics at `/metrics`, including:
 - Rate limit hits
 - Request durations
 - Database operations
+- Redis and PostgreSQL metrics
 
 ## Contributing
 
@@ -212,80 +203,4 @@ The service exposes Prometheus metrics at `/metrics`, including:
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Docker Support
-
-### Quick Start with Docker
-
-1. Copy the example environment file:
-   ```bash
-   cp .env.example .env
-   ```
-
-2. Edit the `.env` file with your configuration.
-
-3. Build and start all services:
-   ```bash
-   docker-compose up -d
-   ```
-
-4. Check service health:
-   ```bash
-   docker-compose ps
-   ```
-
-### Available Services
-
-- **Auth Service**: http://localhost:8080
-- **Prometheus**: http://localhost:9090
-- **Grafana**: http://localhost:3000
-  - Default credentials: admin/admin
-
-### Docker Commands
-
-```bash
-# Build the auth service
-docker-compose build auth
-
-# Start all services
-docker-compose up -d
-
-# View logs
-docker-compose logs -f auth
-
-# Stop all services
-docker-compose down
-
-# Stop and remove volumes
-docker-compose down -v
-
-# Scale the auth service (if needed)
-docker-compose up -d --scale auth=3
-```
-
-### Production Deployment
-
-For production deployment, consider the following:
-
-1. Use a proper secrets management solution
-2. Configure SSL/TLS termination
-3. Use a container orchestration platform (e.g., Kubernetes)
-4. Set up proper monitoring and alerting
-5. Use separate databases for different environments
-
-### Container Health Checks
-
-The following health checks are configured:
-
-- **Auth Service**: HTTP check on `/health` endpoint
-- **PostgreSQL**: `pg_isready` command
-- **Redis**: `redis-cli ping` command
-
-### Data Persistence
-
-Docker volumes are used to persist data:
-
-- `postgres_data`: PostgreSQL data
-- `redis_data`: Redis data
-- `prometheus_data`: Prometheus metrics
-- `grafana_data`: Grafana dashboards and settings 
+ 

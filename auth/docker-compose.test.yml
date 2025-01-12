@@ -7,9 +7,16 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: auth_test_db
     ports:
-      - "5433:5432"  # Using 5433 to avoid conflict with main db
+      - "5433:5432"  # Using different port to avoid conflicts
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
       timeout: 5s
-      retries: 5 
+      retries: 5
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    platform: linux/amd64  # Specified platform for M1/M2 Mac compatibility
+    ports:
+      - "1025:1025"  # SMTP server port
+      - "8025:8025"  # Web UI port 

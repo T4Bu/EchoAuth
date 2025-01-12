@@ -1,0 +1,22 @@
+FROM golang:1.22-alpine
+
+WORKDIR /app
+
+RUN go install github.com/cosmtrek/air@v1.49.0
+
+RUN apk add --no-cache gcc musl-dev
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+# Create tmp directory for Air
+RUN mkdir -p tmp
+
+# Initial build
+RUN go build -o ./tmp/main ./cmd/main.go
+
+EXPOSE 8080
+
+CMD ["air", "-c", ".air.toml"] 

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -79,6 +80,9 @@ func main() {
 
 	// Initialize router
 	router := mux.NewRouter()
+
+	// Add metrics endpoint
+	router.Handle("/metrics", promhttp.Handler())
 
 	// Public routes (with rate limiting)
 	publicRouter := router.PathPrefix("").Subrouter()

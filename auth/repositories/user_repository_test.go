@@ -14,7 +14,7 @@ var testDB *gorm.DB
 
 func TestMain(m *testing.M) {
 	// Setup test database
-	dsn := "host=localhost user=postgres password=postgres dbname=auth_test_db port=5432 sslmode=disable"
+	dsn := "host=localhost user=postgres password=postgres dbname=auth_test_db port=5433 sslmode=disable"
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
 	if err != nil {
 		fmt.Printf("Failed to connect to test database: %v\n", err)

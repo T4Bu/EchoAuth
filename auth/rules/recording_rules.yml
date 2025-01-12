@@ -1,0 +1,20 @@
+groups:
+  - name: auth_service_rules
+    rules:
+      - record: job:request_duration_seconds:avg_rate5m
+        expr: rate(http_request_duration_seconds_sum[5m]) / rate(http_request_duration_seconds_count[5m])
+      
+      - record: job:request_errors:rate5m
+        expr: rate(http_request_errors_total[5m])
+      
+      - record: job:active_sessions:count
+        expr: sum(active_sessions)
+      
+      - record: job:rate_limit_hits:rate5m
+        expr: rate(rate_limit_hits_total[5m])
+      
+      - record: job:login_attempts:rate5m
+        expr: rate(login_attempts_total[5m])
+      
+      - record: job:database_operations:rate5m
+        expr: rate(database_operation_duration_seconds_count[5m]) 

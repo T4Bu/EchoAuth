@@ -1,0 +1,47 @@
+groups:
+  - name: auth_service_alerts
+    rules:
+      - alert: HighErrorRate
+        expr: job:request_errors:rate5m > 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: High error rate detected
+          description: Error rate is above 10% for 5 minutes
+
+      - alert: HighLatency
+        expr: job:request_duration_seconds:avg_rate5m > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: High latency detected
+          description: Average request duration is above 1 second for 5 minutes
+
+      - alert: HighRateLimitHits
+        expr: job:rate_limit_hits:rate5m > 100
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: High rate limit hits
+          description: More than 100 rate limit hits per minute for 5 minutes
+
+      - alert: DatabaseSlowdown
+        expr: rate(database_operation_duration_seconds_sum[5m]) / rate(database_operation_duration_seconds_count[5m]) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Database operations slowdown
+          description: Average database operation taking more than 500ms for 5 minutes
+
+      - alert: HighLoginFailures
+        expr: rate(login_failures_total[5m]) > 50
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: High login failure rate
+          description: More than 50 login failures per minute for 5 minutes 

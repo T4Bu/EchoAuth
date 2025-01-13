@@ -81,6 +81,10 @@ func main() {
 	// Initialize router
 	router := mux.NewRouter()
 
+	// Add security middleware
+	securityConfig := middlewares.NewSecurityConfig()
+	router.Use(securityConfig.SecurityMiddleware)
+
 	// Add metrics endpoint
 	router.Handle("/metrics", promhttp.Handler())
 

@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"time"
 )
 
 type Config struct {
@@ -11,6 +12,7 @@ type Config struct {
 	TokenExpiration int64
 	SMTP            SMTPConfig
 	Redis           RedisConfig
+	JWTExpiry       time.Duration `env:"JWT_EXPIRY" envDefault:"24h"`
 }
 
 type RedisConfig struct {

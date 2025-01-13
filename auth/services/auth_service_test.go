@@ -1,6 +1,7 @@
 package services
 
 import (
+	"auth/config"
 	"auth/models"
 	"auth/repositories"
 	"auth/utils/validator"
@@ -89,8 +90,10 @@ func newMockAccountLockoutService() *AccountLockoutService {
 
 func TestAuthServiceRegister(t *testing.T) {
 	repo := newMockUserRepository()
+	tokenRepo := repositories.NewTokenRepository(nil)
+	cfg := &config.Config{JWTSecret: "test-secret", JWTExpiry: 24 * time.Hour}
 	lockoutService := newMockAccountLockoutService()
-	service := NewAuthService(repo, []byte("test-secret"), lockoutService)
+	service := NewAuthService(repo, tokenRepo, cfg, lockoutService)
 
 	tests := []struct {
 		name      string
@@ -187,8 +190,10 @@ func TestAuthServiceRegister(t *testing.T) {
 
 func TestAuthServiceLogin(t *testing.T) {
 	repo := newMockUserRepository()
+	tokenRepo := repositories.NewTokenRepository(nil)
+	cfg := &config.Config{JWTSecret: "test-secret", JWTExpiry: 24 * time.Hour}
 	lockoutService := newMockAccountLockoutService()
-	service := NewAuthService(repo, []byte("test-secret"), lockoutService)
+	service := NewAuthService(repo, tokenRepo, cfg, lockoutService)
 
 	// Create a test user
 	testUser := &models.User{
@@ -242,8 +247,10 @@ func TestAuthServiceLogin(t *testing.T) {
 
 func TestAuthServiceValidateToken(t *testing.T) {
 	repo := newMockUserRepository()
+	tokenRepo := repositories.NewTokenRepository(nil)
+	cfg := &config.Config{JWTSecret: "test-secret", JWTExpiry: 24 * time.Hour}
 	lockoutService := newMockAccountLockoutService()
-	service := NewAuthService(repo, []byte("test-secret"), lockoutService)
+	service := NewAuthService(repo, tokenRepo, cfg, lockoutService)
 
 	// Create a valid token
 	claims := &models.TokenClaims{
@@ -254,7 +261,7 @@ func TestAuthServiceValidateToken(t *testing.T) {
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	validToken, _ := token.SignedString([]byte("test-secret"))
+	validToken, _ := token.SignedString([]byte(cfg.JWTSecret))
 
 	// Create an expired token
 	expiredClaims := &models.TokenClaims{
@@ -265,7 +272,7 @@ func TestAuthServiceValidateToken(t *testing.T) {
 		},
 	}
 	expiredToken := jwt.NewWithClaims(jwt.SigningMethodHS256, expiredClaims)
-	expiredTokenString, _ := expiredToken.SignedString([]byte("test-secret"))
+	expiredTokenString, _ := expiredToken.SignedString([]byte(cfg.JWTSecret))
 
 	tests := []struct {
 		name    string

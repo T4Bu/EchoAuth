@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 type mockAuthService struct {
@@ -34,6 +35,31 @@ func (m *mockAuthService) Logout(token string) error {
 
 func (m *mockAuthService) ValidateToken(token string) (*models.TokenClaims, error) {
 	return nil, nil
+}
+
+func (m *mockAuthService) GetJWTExpiry() time.Duration {
+	return 24 * time.Hour
+}
+
+func (m *mockAuthService) GetUserByEmail(email string) (*models.User, error) {
+	return &models.User{
+		Email: email,
+		ID:    1,
+	}, nil
+}
+
+func (m *mockAuthService) LoginWithRefresh(email, password, deviceInfo, ip string) (string, string, error) {
+	if m.loginError != nil {
+		return "", "", m.loginError
+	}
+	return m.loginToken, "refresh-token", nil
+}
+
+func (m *mockAuthService) RefreshToken(refreshToken, deviceInfo, ip string) (string, string, error) {
+	if m.loginError != nil {
+		return "", "", m.loginError
+	}
+	return m.loginToken, "new-refresh-token", nil
 }
 
 func TestAuthControllerRegister(t *testing.T) {
@@ -138,8 +164,8 @@ func TestAuthControllerLogin(t *testing.T) {
 			if tt.mockError == nil {
 				var response LoginResponse
 				json.NewDecoder(w.Body).Decode(&response)
-				if response.Token != tt.mockToken {
-					t.Errorf("Expected token %s, got %s", tt.mockToken, response.Token)
+				if response.AccessToken != tt.mockToken {
+					t.Errorf("Expected token %s, got %s", tt.mockToken, response.AccessToken)
 				}
 			}
 		})
@@ -150,7 +176,12 @@ func TestAuthControllerLogout(t *testing.T) {
 	mockService := &mockAuthService{}
 	controller := NewAuthController(mockService)
 
-	req := httptest.NewRequest("POST", "/api/auth/logout", nil)
+	// Create request body with refresh token
+	body, _ := json.Marshal(map[string]string{
+		"refresh_token": "test-refresh-token",
+	})
+	req := httptest.NewRequest("POST", "/api/auth/logout", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
 	controller.Logout(w, req)

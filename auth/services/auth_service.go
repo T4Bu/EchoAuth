@@ -1,10 +1,13 @@
 package services
 
 import (
+	"auth/config"
 	"auth/models"
 	"auth/repositories"
 	"auth/utils/validator"
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"time"
 
@@ -24,16 +27,22 @@ type AuthServiceInterface interface {
 }
 
 type AuthService struct {
-	userRepo   repositories.UserRepository
-	jwtSecret  []byte
-	lockoutSvc *AccountLockoutService
+	userRepo      repositories.UserRepository
+	tokenRepo     *repositories.TokenRepository
+	jwtExpiry     time.Duration
+	refreshExpiry time.Duration
+	jwtSecret     string
+	lockoutSvc    *AccountLockoutService
 }
 
-func NewAuthService(userRepo repositories.UserRepository, jwtSecret []byte, lockoutSvc *AccountLockoutService) *AuthService {
+func NewAuthService(userRepo repositories.UserRepository, tokenRepo *repositories.TokenRepository, cfg *config.Config, lockoutSvc *AccountLockoutService) *AuthService {
 	return &AuthService{
-		userRepo:   userRepo,
-		jwtSecret:  jwtSecret,
-		lockoutSvc: lockoutSvc,
+		userRepo:      userRepo,
+		tokenRepo:     tokenRepo,
+		jwtExpiry:     cfg.JWTExpiry,
+		refreshExpiry: 30 * 24 * time.Hour, // 30 days
+		jwtSecret:     cfg.JWTSecret,
+		lockoutSvc:    lockoutSvc,
 	}
 }
 
@@ -116,7 +125,7 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (string
 	claims["exp"] = time.Now().Add(time.Hour * 24).Unix()
 	claims["iat"] = time.Now().Unix()
 
-	tokenString, err := token.SignedString(s.jwtSecret)
+	tokenString, err := token.SignedString([]byte(s.jwtSecret))
 	if err != nil {
 		return "", err
 	}
@@ -126,7 +135,7 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (string
 
 func (s *AuthService) ValidateToken(tokenString string) (*models.TokenClaims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &models.TokenClaims{}, func(token *jwt.Token) (interface{}, error) {
-		return s.jwtSecret, nil
+		return []byte(s.jwtSecret), nil
 	})
 
 	if err != nil {
@@ -155,4 +164,115 @@ func (s *AuthService) Logout(token string) error {
 
 	// Reset attempts on logout
 	return s.lockoutSvc.ResetAttempts(context.Background(), user.Email)
+}
+
+func (s *AuthService) generateRefreshToken() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.URLEncoding.EncodeToString(b), nil
+}
+
+func (s *AuthService) LoginWithRefresh(email, password string, deviceInfo, ip string) (string, string, error) {
+	user, err := s.userRepo.FindByEmail(email)
+	if err != nil {
+		return "", "", err
+	}
+
+	if !user.CheckPassword(password) {
+		return "", "", errors.New("invalid credentials")
+	}
+
+	// Generate access token
+	accessToken, err := s.GenerateToken(user.ID)
+	if err != nil {
+		return "", "", err
+	}
+
+	// Generate refresh token
+	refreshToken, err := s.generateRefreshToken()
+	if err != nil {
+		return "", "", err
+	}
+
+	// Store refresh token
+	_, err = s.tokenRepo.CreateRefreshToken(
+		user.ID,
+		refreshToken,
+		time.Now().Add(s.refreshExpiry),
+		deviceInfo,
+		ip,
+	)
+	if err != nil {
+		return "", "", err
+	}
+
+	return accessToken, refreshToken, nil
+}
+
+func (s *AuthService) RefreshToken(refreshToken, deviceInfo, ip string) (string, string, error) {
+	// Get existing refresh token
+	token, err := s.tokenRepo.GetRefreshToken(refreshToken)
+	if err != nil {
+		return "", "", errors.New("invalid refresh token")
+	}
+
+	// Validate token
+	if !token.IsValid() {
+		return "", "", errors.New("refresh token is expired or revoked")
+	}
+
+	// Generate new tokens
+	accessToken, err := s.GenerateToken(token.UserID)
+	if err != nil {
+		return "", "", err
+	}
+
+	newRefreshToken, err := s.generateRefreshToken()
+	if err != nil {
+		return "", "", err
+	}
+
+	// Rotate refresh token
+	_, err = s.tokenRepo.RotateRefreshToken(
+		token,
+		newRefreshToken,
+		time.Now().Add(s.refreshExpiry),
+	)
+	if err != nil {
+		return "", "", err
+	}
+
+	return accessToken, newRefreshToken, nil
+}
+
+func (s *AuthService) RevokeToken(refreshToken string) error {
+	return s.tokenRepo.RevokeRefreshToken(refreshToken)
+}
+
+func (s *AuthService) RevokeAllUserTokens(userID uint) error {
+	return s.tokenRepo.RevokeAllUserTokens(userID)
+}
+
+func (s *AuthService) LogoutWithRefresh(refreshToken string) error {
+	return s.RevokeToken(refreshToken)
+}
+
+func (s *AuthService) GenerateToken(userID uint) (string, error) {
+	token := jwt.New(jwt.SigningMethodHS256)
+	claims := token.Claims.(jwt.MapClaims)
+	claims["user_id"] = userID
+	claims["exp"] = time.Now().Add(s.jwtExpiry).Unix()
+	claims["iat"] = time.Now().Unix()
+
+	return token.SignedString(s.jwtSecret)
+}
+
+func (s *AuthService) GetJWTExpiry() time.Duration {
+	return s.jwtExpiry
+}
+
+func (s *AuthService) GetUserByEmail(email string) (*models.User, error) {
+	return s.userRepo.FindByEmail(email)
 }

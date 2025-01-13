@@ -37,7 +37,8 @@ func (m *mockAuthService) Logout(token string) error {
 
 func TestAuthMiddleware(t *testing.T) {
 	mockService := &mockAuthService{}
-	handler := AuthMiddleware(mockService)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	middleware := NewAuthMiddleware(mockService)
+	handler := middleware.Authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 

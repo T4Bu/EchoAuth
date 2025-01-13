@@ -56,53 +56,53 @@ func main() {
 	}
 	log.Info().Msg("Connected to Redis successfully")
 
-	// Initialize services
+	// Initialize repositories
 	userRepo := repositories.NewUserRepository(db)
-	rateLimiter := services.NewRateLimiter(redisClient, services.RateLimiterConfig{
-		MaxAttempts: 5,
-		Window:      time.Minute,
-	})
+	tokenRepo := repositories.NewTokenRepository(db)
+
+	// Initialize services
 	lockoutSvc := services.NewAccountLockoutService(redisClient)
-	authService := services.NewAuthService(userRepo, []byte(cfg.JWTSecret), lockoutSvc)
-	emailService := services.NewEmailService(services.SMTPConfig{
-		Host:     cfg.SMTP.Host,
-		Port:     cfg.SMTP.Port,
-		Username: cfg.SMTP.Username,
-		Password: cfg.SMTP.Password,
-		From:     cfg.SMTP.From,
-	})
-	passwordResetService := services.NewPasswordResetService(userRepo, emailService)
+	authService := services.NewAuthService(userRepo, tokenRepo, cfg, lockoutSvc)
 
 	// Initialize controllers
-	authController := controllers.NewAuthController(authService)
-	passwordResetController := controllers.NewPasswordResetController(passwordResetService)
 	healthController := controllers.NewHealthController(db, redisClient)
+	authController := controllers.NewAuthController(authService)
 
-	// Initialize router
+	// Initialize middleware
+	authMiddleware := middlewares.NewAuthMiddleware(authService)
+	rateLimiter := middlewares.NewRateLimiter(redisClient)
+	securityConfig := middlewares.NewSecurityConfig()
+
+	// Setup router
 	router := mux.NewRouter()
 
-	// Add security middleware
-	securityConfig := middlewares.NewSecurityConfig()
+	// Apply global middleware
+	router.Use(rateLimiter.RateLimit)
 	router.Use(securityConfig.SecurityMiddleware)
+
+	// Public routes
+	router.HandleFunc("/health", healthController.Check).Methods("GET")
+	router.HandleFunc("/api/auth/register", authController.Register).Methods("POST")
+	router.HandleFunc("/api/auth/login", authController.Login).Methods("POST")
+	router.HandleFunc("/api/auth/refresh", authController.RefreshToken).Methods("POST")
+
+	// Protected routes
+	protected := router.PathPrefix("/api").Subrouter()
+	protected.Use(authMiddleware.Authenticate)
+	protected.HandleFunc("/auth/logout", authController.Logout).Methods("POST")
+
+	// Start cleanup goroutine for expired tokens
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		for range ticker.C {
+			if err := tokenRepo.CleanupExpiredTokens(); err != nil {
+				log.Error().Err(err).Msg("Failed to cleanup expired tokens")
+			}
+		}
+	}()
 
 	// Add metrics endpoint
 	router.Handle("/metrics", promhttp.Handler())
-
-	// Public routes (with rate limiting)
-	publicRouter := router.PathPrefix("").Subrouter()
-	publicRouter.Use(middlewares.RateLimitMiddleware(rateLimiter))
-	publicRouter.HandleFunc("/auth/register", authController.Register).Methods("POST")
-	publicRouter.HandleFunc("/auth/login", authController.Login).Methods("POST")
-	publicRouter.HandleFunc("/auth/reset-password/request", passwordResetController.RequestReset).Methods("POST")
-	publicRouter.HandleFunc("/auth/reset-password/reset", passwordResetController.ResetPassword).Methods("POST")
-
-	// Protected routes
-	protectedRouter := router.PathPrefix("").Subrouter()
-	protectedRouter.Use(middlewares.AuthMiddleware(authService))
-	protectedRouter.HandleFunc("/auth/logout", authController.Logout).Methods("POST")
-
-	// Health check endpoint
-	router.HandleFunc("/health", healthController.Check).Methods("GET")
 
 	// Start server
 	log.Info().Str("port", cfg.Port).Msg("Starting server")

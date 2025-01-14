@@ -3,13 +3,13 @@ services:
   test-db:
     image: postgres:14
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_password
       POSTGRES_DB: auth_test_db
     ports:
       - "5433:5432"  # Using different port to avoid conflicts
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U test_user"]
       interval: 5s
       timeout: 5s
       retries: 5

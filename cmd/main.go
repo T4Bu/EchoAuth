@@ -11,6 +11,9 @@ import (
 	"EchoAuth/utils/logger"
 	"context"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -91,22 +94,70 @@ func main() {
 	protected.Use(authMiddleware.Authenticate)
 	protected.HandleFunc("/EchoAuth/logout", authController.Logout).Methods("POST")
 
+	// Add metrics endpoint
+	router.Handle("/metrics", promhttp.Handler())
+
+	// Create server instance
+	srv := &http.Server{
+		Addr:    ":" + cfg.Port,
+		Handler: router,
+	}
+
+	// Create context that listens for signals
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	// Start cleanup goroutine for expired tokens
 	go func() {
 		ticker := time.NewTicker(24 * time.Hour)
-		for range ticker.C {
-			if err := tokenRepo.CleanupExpiredTokens(); err != nil {
-				log.Error().Err(err).Msg("Failed to cleanup expired tokens")
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := tokenRepo.CleanupExpiredTokens(); err != nil {
+					log.Error().Err(err).Msg("Failed to cleanup expired tokens")
+				}
+			case <-ctx.Done():
+				return
 			}
 		}
 	}()
 
-	// Add metrics endpoint
-	router.Handle("/metrics", promhttp.Handler())
+	// Start server in a goroutine
+	go func() {
+		log.Info().Str("port", cfg.Port).Msg("Starting server")
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatal().Err(err).Msg("Server failed to start")
+		}
+	}()
 
-	// Start server
-	log.Info().Str("port", cfg.Port).Msg("Starting server")
-	if err := http.ListenAndServe(":"+cfg.Port, router); err != nil {
-		log.Fatal().Err(err).Msg("Server failed to start")
+	// Wait for interrupt signal
+	<-ctx.Done()
+	log.Info().Msg("Shutting down gracefully...")
+
+	// Create shutdown context with timeout
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Attempt graceful shutdown
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Fatal().Err(err).Msg("Server forced to shutdown")
 	}
+
+	// Close database connection
+	sqlDB, err := db.DB()
+	if err != nil {
+		log.Error().Err(err).Msg("Failed to get database instance")
+	} else {
+		if err := sqlDB.Close(); err != nil {
+			log.Error().Err(err).Msg("Error closing database connection")
+		}
+	}
+
+	// Close Redis connection
+	if err := redisClient.Close(); err != nil {
+		log.Error().Err(err).Msg("Error closing Redis connection")
+	}
+
+	log.Info().Msg("Server exited properly")
 }

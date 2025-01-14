@@ -1,8 +1,8 @@
 package middlewares
 
 import (
-	"auth/services"
-	"auth/utils/response"
+	"EchoAuth/services"
+	"EchoAuth/utils/response"
 	"context"
 	"net/http"
 	"strings"

@@ -1,7 +1,7 @@
 package controllers
 
 import (
-	"auth/models"
+	"EchoAuth/models"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -99,7 +99,7 @@ func TestAuthControllerRegister(t *testing.T) {
 			controller := NewAuthController(mockService)
 
 			body, _ := json.Marshal(tt.requestBody)
-			req := httptest.NewRequest("POST", "/api/auth/register", bytes.NewBuffer(body))
+			req := httptest.NewRequest("POST", "/api/EchoAuth/register", bytes.NewBuffer(body))
 			req.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
 
@@ -151,7 +151,7 @@ func TestAuthControllerLogin(t *testing.T) {
 			controller := NewAuthController(mockService)
 
 			body, _ := json.Marshal(tt.requestBody)
-			req := httptest.NewRequest("POST", "/api/auth/login", bytes.NewBuffer(body))
+			req := httptest.NewRequest("POST", "/api/EchoAuth/login", bytes.NewBuffer(body))
 			req.Header.Set("Content-Type", "application/json")
 			w := httptest.NewRecorder()
 
@@ -176,11 +176,10 @@ func TestAuthControllerLogout(t *testing.T) {
 	mockService := &mockAuthService{}
 	controller := NewAuthController(mockService)
 
-	// Create request body with refresh token
 	body, _ := json.Marshal(map[string]string{
 		"refresh_token": "test-refresh-token",
 	})
-	req := httptest.NewRequest("POST", "/api/auth/logout", bytes.NewBuffer(body))
+	req := httptest.NewRequest("POST", "/api/EchoAuth/logout", bytes.NewBuffer(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 

@@ -1,7 +1,7 @@
 package middlewares
 
 import (
-	"auth/models"
+	"EchoAuth/models"
 	"context"
 	"errors"
 	"net/http"

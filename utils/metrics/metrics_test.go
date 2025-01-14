@@ -74,8 +74,8 @@ func TestRecordRequestDuration(t *testing.T) {
 	prometheus.MustRegister(RequestDuration)
 
 	// Record some durations
-	RecordRequestDuration("/auth/login", "POST", 200, 100*time.Millisecond)
-	RecordRequestDuration("/auth/login", "POST", 401, 50*time.Millisecond)
+	RecordRequestDuration("/EchoAuth/login", "POST", 200, 100*time.Millisecond)
+	RecordRequestDuration("/EchoAuth/login", "POST", 401, 50*time.Millisecond)
 
 	// Check that metrics were recorded (we can't easily check exact values for histograms)
 	if testutil.CollectAndCount(RequestDuration) == 0 {

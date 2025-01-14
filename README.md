@@ -85,7 +85,7 @@ docker compose -f docker-compose.dev.yml down
 
 ### Authentication Endpoints
 
-- POST `/auth/register`
+- POST `/EchoAuth/register`
   ```json
   {
     "email": "user@example.com",
@@ -95,7 +95,7 @@ docker compose -f docker-compose.dev.yml down
   }
   ```
 
-- POST `/auth/login`
+- POST `/EchoAuth/login`
   ```json
   {
     "email": "user@example.com",
@@ -103,19 +103,19 @@ docker compose -f docker-compose.dev.yml down
   }
   ```
 
-- POST `/auth/logout`
+- POST `/EchoAuth/logout`
   - Requires JWT token in Authorization header
 
 ### Password Reset
 
-- POST `/auth/reset-password/request`
+- POST `/EchoAuth/reset-password/request`
   ```json
   {
     "email": "user@example.com"
   }
   ```
 
-- POST `/auth/reset-password/reset`
+- POST `/EchoAuth/reset-password/reset`
   ```json
   {
     "token": "reset-token",

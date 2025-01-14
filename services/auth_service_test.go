@@ -1,10 +1,10 @@
 package services
 
 import (
-	"auth/config"
-	"auth/models"
-	"auth/repositories"
-	"auth/utils/validator"
+	"EchoAuth/config"
+	"EchoAuth/models"
+	"EchoAuth/repositories"
+	"EchoAuth/utils/validator"
 	"context"
 	"errors"
 	"testing"

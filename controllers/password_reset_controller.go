@@ -1,7 +1,7 @@
 package controllers
 
 import (
-	"auth/services"
+	"EchoAuth/services"
 	"encoding/json"
 	"net/http"
 )

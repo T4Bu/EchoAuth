@@ -1,8 +1,8 @@
 package middlewares
 
 import (
-	"auth/utils/logger"
-	"auth/utils/metrics"
+	"EchoAuth/utils/logger"
+	"EchoAuth/utils/metrics"
 	"net/http"
 	"time"
 )

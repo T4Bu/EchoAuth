@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"time"
 
-	"auth/models"
-	"auth/utils/response"
+	"EchoAuth/models"
+	"EchoAuth/utils/response"
 
 	"github.com/go-playground/validator/v10"
 )

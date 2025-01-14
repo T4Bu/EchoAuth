@@ -1,8 +1,8 @@
 package services
 
 import (
-	"auth/models"
-	"auth/utils/validator"
+	"EchoAuth/models"
+	"EchoAuth/utils/validator"
 	"errors"
 	"testing"
 	"time"

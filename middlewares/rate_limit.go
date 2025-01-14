@@ -1,8 +1,8 @@
 package middlewares
 
 import (
-	"auth/services"
-	"auth/utils/metrics"
+	"EchoAuth/services"
+	"EchoAuth/utils/metrics"
 	"fmt"
 	"net/http"
 	"strings"

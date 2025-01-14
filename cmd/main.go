@@ -1,14 +1,14 @@
 package main
 
 import (
-	"auth/config"
-	"auth/controllers"
-	"auth/database"
-	"auth/middlewares"
-	"auth/models"
-	"auth/repositories"
-	"auth/services"
-	"auth/utils/logger"
+	"EchoAuth/config"
+	"EchoAuth/controllers"
+	"EchoAuth/database"
+	"EchoAuth/middlewares"
+	"EchoAuth/models"
+	"EchoAuth/repositories"
+	"EchoAuth/services"
+	"EchoAuth/utils/logger"
 	"context"
 	"net/http"
 	"time"
@@ -82,14 +82,14 @@ func main() {
 
 	// Public routes
 	router.HandleFunc("/health", healthController.Check).Methods("GET")
-	router.HandleFunc("/api/auth/register", authController.Register).Methods("POST")
-	router.HandleFunc("/api/auth/login", authController.Login).Methods("POST")
-	router.HandleFunc("/api/auth/refresh", authController.RefreshToken).Methods("POST")
+	router.HandleFunc("/api/EchoAuth/register", authController.Register).Methods("POST")
+	router.HandleFunc("/api/EchoAuth/login", authController.Login).Methods("POST")
+	router.HandleFunc("/api/EchoAuth/refresh", authController.RefreshToken).Methods("POST")
 
 	// Protected routes
 	protected := router.PathPrefix("/api").Subrouter()
 	protected.Use(authMiddleware.Authenticate)
-	protected.HandleFunc("/auth/logout", authController.Logout).Methods("POST")
+	protected.HandleFunc("/EchoAuth/logout", authController.Logout).Methods("POST")
 
 	// Start cleanup goroutine for expired tokens
 	go func() {

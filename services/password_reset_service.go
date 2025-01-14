@@ -1,9 +1,9 @@
 package services
 
 import (
-	"auth/models"
-	"auth/repositories"
-	"auth/utils/validator"
+	"EchoAuth/models"
+	"EchoAuth/repositories"
+	"EchoAuth/utils/validator"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"

@@ -1,7 +1,7 @@
 package repositories
 
 import (
-	"auth/models"
+	"EchoAuth/models"
 	"fmt"
 	"os"
 	"testing"

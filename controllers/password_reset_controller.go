@@ -1,16 +1,22 @@
 package controllers
 
 import (
-	"EchoAuth/services"
+	"EchoAuth/models"
 	"encoding/json"
 	"net/http"
 )
 
-type PasswordResetController struct {
-	resetService *services.PasswordResetService
+type PasswordResetServiceInterface interface {
+	GenerateResetToken(email string) (string, error)
+	ValidateResetToken(token string) (*models.User, error)
+	ResetPassword(token, newPassword string) error
 }
 
-func NewPasswordResetController(resetService *services.PasswordResetService) *PasswordResetController {
+type PasswordResetController struct {
+	resetService PasswordResetServiceInterface
+}
+
+func NewPasswordResetController(resetService PasswordResetServiceInterface) *PasswordResetController {
 	return &PasswordResetController{
 		resetService: resetService,
 	}
@@ -27,6 +33,11 @@ type ResetPasswordRequest struct {
 
 // RequestReset handles requests to generate a password reset token
 func (c *PasswordResetController) RequestReset(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Content-Type") != "application/json" {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
 	var req RequestResetRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -54,6 +65,11 @@ func (c *PasswordResetController) RequestReset(w http.ResponseWriter, r *http.Re
 
 // ResetPassword handles password reset requests
 func (c *PasswordResetController) ResetPassword(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Content-Type") != "application/json" {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
 	var req ResetPasswordRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)

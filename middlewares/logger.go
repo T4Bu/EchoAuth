@@ -4,6 +4,7 @@ import (
 	"EchoAuth/utils/logger"
 	"EchoAuth/utils/metrics"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -51,7 +52,11 @@ func LoggerMiddleware(next http.Handler) http.Handler {
 		duration := time.Since(start)
 
 		// Record metrics
-		metrics.RecordRequestDuration(r.URL.Path, r.Method, wrapped.status, duration)
+		metrics.RequestDuration.WithLabelValues(
+			r.URL.Path,
+			r.Method,
+			strconv.Itoa(wrapped.status),
+		).Observe(duration.Seconds())
 
 		// Create log event
 		event := log.Info().

@@ -7,6 +7,15 @@ import (
 	"gorm.io/gorm"
 )
 
+type TokenRepositoryInterface interface {
+	CreateRefreshToken(userID uint, token string, expiresAt time.Time, deviceInfo, ip string) (*models.RefreshToken, error)
+	GetRefreshToken(token string) (*models.RefreshToken, error)
+	RotateRefreshToken(currentToken *models.RefreshToken, newToken string, expiresAt time.Time) (*models.RefreshToken, error)
+	RevokeRefreshToken(token string) error
+	RevokeAllUserTokens(userID uint) error
+	CleanupExpiredTokens() error
+}
+
 type TokenRepository struct {
 	db *gorm.DB
 }

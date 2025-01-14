@@ -2,6 +2,7 @@ package models
 
 import (
 	"testing"
+	"time"
 )
 
 func TestUserHashPassword(t *testing.T) {
@@ -49,9 +50,9 @@ func TestUserHashPassword(t *testing.T) {
 					t.Error("Password was not hashed")
 				}
 
-				// Verify that the hashed password can be checked
+				// Verify that the hash is valid by checking it
 				if !u.CheckPassword(tt.password) {
-					t.Error("CheckPassword() failed to verify hashed password")
+					t.Error("Password hash verification failed")
 				}
 			}
 		})
@@ -62,30 +63,37 @@ func TestUserCheckPassword(t *testing.T) {
 	tests := []struct {
 		name        string
 		password    string
-		check       string
-		wantErr     bool
+		checkPass   string
+		want        bool
 		description string
 	}{
 		{
 			name:        "Correct password",
 			password:    "password123",
-			check:       "password123",
-			wantErr:     false,
-			description: "Should verify correct password",
+			checkPass:   "password123",
+			want:        true,
+			description: "Should return true for correct password",
 		},
 		{
 			name:        "Incorrect password",
 			password:    "password123",
-			check:       "wrongpassword",
-			wantErr:     true,
-			description: "Should reject incorrect password",
+			checkPass:   "wrongpassword",
+			want:        false,
+			description: "Should return false for incorrect password",
 		},
 		{
-			name:        "Empty password check",
+			name:        "Empty password",
 			password:    "password123",
-			check:       "",
-			wantErr:     true,
-			description: "Should reject empty password",
+			checkPass:   "",
+			want:        false,
+			description: "Should return false for empty password",
+		},
+		{
+			name:        "Case sensitive check",
+			password:    "Password123",
+			checkPass:   "password123",
+			want:        false,
+			description: "Should be case sensitive",
 		},
 	}
 
@@ -95,16 +103,99 @@ func TestUserCheckPassword(t *testing.T) {
 				Password: tt.password,
 			}
 
-			// First hash the password
-			if err := u.HashPassword(tt.password); err != nil {
+			// Hash the initial password
+			err := u.HashPassword(tt.password)
+			if err != nil {
 				t.Fatalf("Failed to hash password: %v", err)
 			}
 
-			// Then check the password
-			result := u.CheckPassword(tt.check)
-			if result != !tt.wantErr {
-				t.Errorf("User.CheckPassword() result = %v, wantErr %v", result, tt.wantErr)
+			// Check the password
+			if got := u.CheckPassword(tt.checkPass); got != tt.want {
+				t.Errorf("User.CheckPassword() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestUserValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		user        User
+		wantErr     bool
+		description string
+	}{
+		{
+			name: "Valid user",
+			user: User{
+				Email:     "test@example.com",
+				Password:  "password123",
+				FirstName: "John",
+				LastName:  "Doe",
+			},
+			wantErr:     false,
+			description: "Should pass validation for valid user",
+		},
+		{
+			name: "Missing email",
+			user: User{
+				Password:  "password123",
+				FirstName: "John",
+				LastName:  "Doe",
+			},
+			wantErr:     true,
+			description: "Should fail validation when email is missing",
+		},
+		{
+			name: "Invalid email format",
+			user: User{
+				Email:     "invalid-email",
+				Password:  "password123",
+				FirstName: "John",
+				LastName:  "Doe",
+			},
+			wantErr:     true,
+			description: "Should fail validation for invalid email format",
+		},
+		{
+			name: "Missing password",
+			user: User{
+				Email:     "test@example.com",
+				FirstName: "John",
+				LastName:  "Doe",
+			},
+			wantErr:     true,
+			description: "Should fail validation when password is missing",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.user.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("User.Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestUserTimestamps(t *testing.T) {
+	u := &User{}
+
+	// Test CreatedAt is set
+	if !u.CreatedAt.IsZero() {
+		t.Error("CreatedAt should be zero before save")
+	}
+
+	// Simulate database save
+	now := time.Now()
+	u.CreatedAt = now
+	u.UpdatedAt = now
+
+	if u.CreatedAt != now {
+		t.Error("CreatedAt was not set correctly")
+	}
+
+	if u.UpdatedAt != now {
+		t.Error("UpdatedAt was not set correctly")
 	}
 }

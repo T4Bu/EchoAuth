@@ -2,18 +2,9 @@ package config
 
 import (
 	"os"
+	"strconv"
 	"time"
 )
-
-type Config struct {
-	Port            string
-	JWTSecret       string
-	DatabaseURL     string
-	TokenExpiration int64
-	SMTP            SMTPConfig
-	Redis           RedisConfig
-	JWTExpiry       time.Duration `env:"JWT_EXPIRY" envDefault:"24h"`
-}
 
 type RedisConfig struct {
 	Addr     string
@@ -21,37 +12,46 @@ type RedisConfig struct {
 	DB       int
 }
 
-type SMTPConfig struct {
-	Host     string
-	Port     int
-	Username string
-	Password string
-	From     string
+type Config struct {
+	Port        string
+	JWTSecret   string
+	JWTExpiry   time.Duration
+	DatabaseURL string
+	Redis       RedisConfig
+	Environment string
 }
 
 func LoadConfig() *Config {
+	jwtExpiry := 24 * time.Hour
+	if expStr := getEnv("JWT_EXPIRY", "24h"); expStr != "" {
+		if exp, err := time.ParseDuration(expStr); err == nil {
+			jwtExpiry = exp
+		}
+	}
+
+	redisDB := 0
+	if dbStr := getEnv("REDIS_DB", "0"); dbStr != "" {
+		if db, err := strconv.Atoi(dbStr); err == nil {
+			redisDB = db
+		}
+	}
+
 	return &Config{
-		Port:            getEnv("PORT", "8080"),
-		JWTSecret:       getEnv("JWT_SECRET", "your-super-secret-key-change-this-in-production"),
-		DatabaseURL:     getEnv("DATABASE_URL", "host=localhost user=postgres password=postgres dbname=auth_db port=5432 sslmode=disable"),
-		TokenExpiration: 24 * 60 * 60, // 24 hours in seconds
-		SMTP: SMTPConfig{
-			Host:     getEnv("SMTP_HOST", "smtp.gmail.com"),
-			Port:     587, // Default TLS port
-			Username: getEnv("SMTP_USERNAME", ""),
-			Password: getEnv("SMTP_PASSWORD", ""),
-			From:     getEnv("SMTP_FROM", "noreply@example.com"),
-		},
+		Port:        getEnv("PORT", "8080"),
+		JWTSecret:   getEnv("JWT_SECRET", "your-secret-key"),
+		JWTExpiry:   jwtExpiry,
+		DatabaseURL: getEnv("DATABASE_URL", "host=localhost user=postgres password=postgres dbname=auth_db port=5432 sslmode=disable"),
 		Redis: RedisConfig{
 			Addr:     getEnv("REDIS_ADDR", "localhost:6379"),
-			Password: getEnv("REDIS_PASSWORD", ""),
-			DB:       0, // Default database
+			Password: getEnv("REDIS_PASS", ""),
+			DB:       redisDB,
 		},
+		Environment: getEnv("ENV", "development"),
 	}
 }
 
 func getEnv(key, defaultValue string) string {
-	if value, exists := os.LookupEnv(key); exists {
+	if value := os.Getenv(key); value != "" {
 		return value
 	}
 	return defaultValue

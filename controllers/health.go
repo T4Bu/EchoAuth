@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -10,9 +11,17 @@ import (
 	"gorm.io/gorm"
 )
 
+type DBInterface interface {
+	DB() (*sql.DB, error)
+}
+
+type RedisInterface interface {
+	Ping(ctx context.Context) *redis.StatusCmd
+}
+
 type HealthController struct {
-	db    *gorm.DB
-	redis *redis.Client
+	db    DBInterface
+	redis RedisInterface
 }
 
 type HealthResponse struct {
@@ -21,9 +30,18 @@ type HealthResponse struct {
 	Services  map[string]string `json:"services"`
 }
 
+// gormDBAdapter adapts *gorm.DB to DBInterface
+type gormDBAdapter struct {
+	gormDB *gorm.DB
+}
+
+func (g *gormDBAdapter) DB() (*sql.DB, error) {
+	return g.gormDB.DB()
+}
+
 func NewHealthController(db *gorm.DB, redis *redis.Client) *HealthController {
 	return &HealthController{
-		db:    db,
+		db:    &gormDBAdapter{gormDB: db},
 		redis: redis,
 	}
 }
@@ -36,7 +54,10 @@ func (h *HealthController) Check(w http.ResponseWriter, r *http.Request) {
 	// Check database
 	sqlDB, err := h.db.DB()
 	if err != nil {
-		services["database"] = "error: failed to get database instance"
+		services["database"] = "error: " + err.Error()
+		overallStatus = "unhealthy"
+	} else if sqlDB == nil {
+		services["database"] = "error: database connection is nil"
 		overallStatus = "unhealthy"
 	} else if err := sqlDB.Ping(); err != nil {
 		services["database"] = "error: " + err.Error()

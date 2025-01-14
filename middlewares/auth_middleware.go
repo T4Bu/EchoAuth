@@ -8,6 +8,10 @@ import (
 	"strings"
 )
 
+type contextKey string
+
+const userIDKey contextKey = "user_id"
+
 type AuthMiddleware struct {
 	authService services.AuthServiceInterface
 }
@@ -40,7 +44,7 @@ func (m *AuthMiddleware) Authenticate(next http.Handler) http.Handler {
 
 		// Add claims to request context
 		ctx := r.Context()
-		ctx = context.WithValue(ctx, "user_id", claims.UserID)
+		ctx = context.WithValue(ctx, userIDKey, claims.UserID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

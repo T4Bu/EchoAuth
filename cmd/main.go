@@ -23,13 +23,31 @@ import (
 	"gorm.io/gorm"
 )
 
+// Dependencies holds all service dependencies
 type Dependencies struct {
 	UserRepo    repositories.UserRepository
 	TokenRepo   *repositories.TokenRepository
 	LockoutSvc  *services.AccountLockoutService
-	AuthService *services.AuthService
+	AuthService controllers.AuthService
 	RedisClient *redis.Client
 	DB          *gorm.DB
+}
+
+// NewDependencies creates a new Dependencies instance
+func NewDependencies(db *gorm.DB, redisClient *redis.Client, cfg *config.Config) *Dependencies {
+	userRepo := repositories.NewUserRepository(db)
+	tokenRepo := repositories.NewTokenRepository(db)
+	lockoutSvc := services.NewAccountLockoutService(redisClient)
+	authService := services.NewAuthService(userRepo, tokenRepo, cfg, lockoutSvc)
+
+	return &Dependencies{
+		UserRepo:    userRepo,
+		TokenRepo:   tokenRepo,
+		LockoutSvc:  lockoutSvc,
+		AuthService: authService,
+		RedisClient: redisClient,
+		DB:          db,
+	}
 }
 
 func initLogger() zerolog.Logger {
@@ -66,22 +84,6 @@ func initRedis(cfg *config.Config, log zerolog.Logger) *redis.Client {
 	}
 	log.Info().Msg("Connected to Redis successfully")
 	return redisClient
-}
-
-func initDependencies(db *gorm.DB, redisClient *redis.Client, cfg *config.Config) *Dependencies {
-	userRepo := repositories.NewUserRepository(db)
-	tokenRepo := repositories.NewTokenRepository(db)
-	lockoutSvc := services.NewAccountLockoutService(redisClient)
-	authService := services.NewAuthService(userRepo, tokenRepo, cfg, lockoutSvc)
-
-	return &Dependencies{
-		UserRepo:    userRepo,
-		TokenRepo:   tokenRepo,
-		LockoutSvc:  lockoutSvc,
-		AuthService: authService,
-		RedisClient: redisClient,
-		DB:          db,
-	}
 }
 
 func setupRouter(deps *Dependencies) *mux.Router {
@@ -189,7 +191,7 @@ func main() {
 
 	db := initDatabase(cfg, log)
 	redisClient := initRedis(cfg, log)
-	deps := initDependencies(db, redisClient, cfg)
+	deps := NewDependencies(db, redisClient, cfg)
 
 	router := setupRouter(deps)
 

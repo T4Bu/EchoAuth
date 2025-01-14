@@ -21,21 +21,24 @@ var (
 
 type AuthServiceInterface interface {
 	Register(email, password, firstName, lastName string) error
-	Login(ctx context.Context, email, password string) (string, error)
-	ValidateToken(token string) (*models.TokenClaims, error)
+	LoginWithRefresh(email, password, deviceInfo, ip string) (string, string, error)
 	Logout(token string) error
+	ValidateToken(token string) (*models.TokenClaims, error)
+	RefreshToken(refreshToken, deviceInfo, ip string) (string, string, error)
+	GetJWTExpiry() time.Duration
+	GetUserByEmail(email string) (*models.User, error)
 }
 
 type AuthService struct {
 	userRepo      repositories.UserRepository
-	tokenRepo     *repositories.TokenRepository
+	tokenRepo     repositories.TokenRepositoryInterface
 	jwtExpiry     time.Duration
 	refreshExpiry time.Duration
 	jwtSecret     string
 	lockoutSvc    *AccountLockoutService
 }
 
-func NewAuthService(userRepo repositories.UserRepository, tokenRepo *repositories.TokenRepository, cfg *config.Config, lockoutSvc *AccountLockoutService) *AuthService {
+func NewAuthService(userRepo repositories.UserRepository, tokenRepo repositories.TokenRepositoryInterface, cfg *config.Config, lockoutSvc *AccountLockoutService) *AuthService {
 	return &AuthService{
 		userRepo:      userRepo,
 		tokenRepo:     tokenRepo,
@@ -266,7 +269,7 @@ func (s *AuthService) GenerateToken(userID uint) (string, error) {
 	claims["exp"] = time.Now().Add(s.jwtExpiry).Unix()
 	claims["iat"] = time.Now().Unix()
 
-	return token.SignedString(s.jwtSecret)
+	return token.SignedString([]byte(s.jwtSecret))
 }
 
 func (s *AuthService) GetJWTExpiry() time.Duration {

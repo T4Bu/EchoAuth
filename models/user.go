@@ -1,6 +1,7 @@
 package models
 
 import (
+	"EchoAuth/utils/validator"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -34,4 +35,15 @@ func (u *User) HashPassword(password string) error {
 func (u *User) CheckPassword(password string) bool {
 	err := bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(password))
 	return err == nil
+}
+
+// Validate performs validation on the user model
+func (u *User) Validate() error {
+	if err := validator.ValidateEmail(u.Email); err != nil {
+		return err
+	}
+	if u.Password == "" {
+		return validator.ErrPasswordTooShort
+	}
+	return nil
 }

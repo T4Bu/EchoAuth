@@ -88,6 +88,82 @@ func newMockAccountLockoutService() *AccountLockoutService {
 	}
 }
 
+type mockTokenRepository struct {
+	tokens map[string]*models.RefreshToken
+}
+
+func newMockTokenRepository() repositories.TokenRepositoryInterface {
+	return &mockTokenRepository{
+		tokens: make(map[string]*models.RefreshToken),
+	}
+}
+
+func (m *mockTokenRepository) CreateRefreshToken(userID uint, token string, expiresAt time.Time, deviceInfo, ip string) (*models.RefreshToken, error) {
+	refreshToken := &models.RefreshToken{
+		UserID:     userID,
+		Token:      token,
+		ExpiresAt:  expiresAt,
+		DeviceInfo: deviceInfo,
+		IP:         ip,
+	}
+	m.tokens[token] = refreshToken
+	return refreshToken, nil
+}
+
+func (m *mockTokenRepository) GetRefreshToken(token string) (*models.RefreshToken, error) {
+	if t, exists := m.tokens[token]; exists {
+		return t, nil
+	}
+	return nil, repositories.ErrNotFound
+}
+
+func (m *mockTokenRepository) RotateRefreshToken(oldToken *models.RefreshToken, newToken string, expiresAt time.Time) (*models.RefreshToken, error) {
+	// Mark old token as used
+	oldToken.Used = true
+	m.tokens[oldToken.Token] = oldToken
+
+	// Create new token
+	refreshToken := &models.RefreshToken{
+		UserID:     oldToken.UserID,
+		Token:      newToken,
+		ExpiresAt:  expiresAt,
+		DeviceInfo: oldToken.DeviceInfo,
+		IP:         oldToken.IP,
+	}
+	m.tokens[newToken] = refreshToken
+	return refreshToken, nil
+}
+
+func (m *mockTokenRepository) RevokeRefreshToken(token string) error {
+	if t, exists := m.tokens[token]; exists {
+		now := time.Now()
+		t.RevokedAt = &now
+		m.tokens[token] = t
+		return nil
+	}
+	return repositories.ErrNotFound
+}
+
+func (m *mockTokenRepository) RevokeAllUserTokens(userID uint) error {
+	now := time.Now()
+	for _, t := range m.tokens {
+		if t.UserID == userID {
+			t.RevokedAt = &now
+			m.tokens[t.Token] = t
+		}
+	}
+	return nil
+}
+
+func (m *mockTokenRepository) CleanupExpiredTokens() error {
+	for token, t := range m.tokens {
+		if t.ExpiresAt.Before(time.Now()) || t.Used || t.RevokedAt != nil {
+			delete(m.tokens, token)
+		}
+	}
+	return nil
+}
+
 func TestAuthServiceRegister(t *testing.T) {
 	repo := newMockUserRepository()
 	tokenRepo := repositories.NewTokenRepository(nil)
@@ -310,6 +386,244 @@ func TestAuthServiceValidateToken(t *testing.T) {
 			}
 			if !tt.wantErr && claims == nil {
 				t.Error("AuthService.ValidateToken() returned nil claims for valid token")
+			}
+		})
+	}
+}
+
+func TestAuthServiceLoginWithRefresh(t *testing.T) {
+	userRepo := newMockUserRepository()
+	tokenRepo := newMockTokenRepository()
+	cfg := &config.Config{
+		JWTSecret: "test-secret",
+		JWTExpiry: 24 * time.Hour,
+	}
+	lockoutService := newMockAccountLockoutService()
+	service := NewAuthService(userRepo, tokenRepo, cfg, lockoutService)
+
+	// Create a test user
+	testUser := &models.User{
+		Email:     "test@example.com",
+		Password:  "Password123!",
+		FirstName: "John",
+		LastName:  "Doe",
+	}
+	testUser.HashPassword(testUser.Password)
+	userRepo.Create(testUser)
+
+	tests := []struct {
+		name       string
+		email      string
+		password   string
+		deviceInfo string
+		ip         string
+		wantErr    bool
+	}{
+		{
+			name:       "Valid login",
+			email:      "test@example.com",
+			password:   "Password123!",
+			deviceInfo: "Chrome on macOS",
+			ip:         "127.0.0.1",
+			wantErr:    false,
+		},
+		{
+			name:       "Invalid email",
+			email:      "wrong@example.com",
+			password:   "Password123!",
+			deviceInfo: "Chrome on macOS",
+			ip:         "127.0.0.1",
+			wantErr:    true,
+		},
+		{
+			name:       "Invalid password",
+			email:      "test@example.com",
+			password:   "WrongPassword123!",
+			deviceInfo: "Chrome on macOS",
+			ip:         "127.0.0.1",
+			wantErr:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			accessToken, refreshToken, err := service.LoginWithRefresh(tt.email, tt.password, tt.deviceInfo, tt.ip)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("AuthService.LoginWithRefresh() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr {
+				if accessToken == "" {
+					t.Error("AuthService.LoginWithRefresh() returned empty access token for valid credentials")
+				}
+				if refreshToken == "" {
+					t.Error("AuthService.LoginWithRefresh() returned empty refresh token for valid credentials")
+				}
+			}
+		})
+	}
+}
+
+func TestAuthServiceRefreshToken(t *testing.T) {
+	userRepo := newMockUserRepository()
+	tokenRepo := newMockTokenRepository()
+	cfg := &config.Config{
+		JWTSecret: "test-secret",
+		JWTExpiry: 24 * time.Hour,
+	}
+	lockoutService := newMockAccountLockoutService()
+	service := NewAuthService(userRepo, tokenRepo, cfg, lockoutService)
+
+	// Create a test user
+	testUser := &models.User{
+		ID:        1,
+		Email:     "test@example.com",
+		Password:  "Password123!",
+		FirstName: "John",
+		LastName:  "Doe",
+	}
+	userRepo.Create(testUser)
+
+	// Create a valid refresh token
+	validToken := &models.RefreshToken{
+		UserID:     testUser.ID,
+		Token:      "valid-refresh-token",
+		ExpiresAt:  time.Now().Add(24 * time.Hour),
+		DeviceInfo: "Chrome on macOS",
+		IP:         "127.0.0.1",
+	}
+	tokenRepo.(*mockTokenRepository).tokens[validToken.Token] = validToken
+
+	// Create an expired refresh token
+	expiredToken := &models.RefreshToken{
+		UserID:     testUser.ID,
+		Token:      "expired-refresh-token",
+		ExpiresAt:  time.Now().Add(-24 * time.Hour),
+		DeviceInfo: "Chrome on macOS",
+		IP:         "127.0.0.1",
+	}
+	tokenRepo.(*mockTokenRepository).tokens[expiredToken.Token] = expiredToken
+
+	// Create a revoked refresh token
+	now := time.Now()
+	revokedToken := &models.RefreshToken{
+		UserID:     testUser.ID,
+		Token:      "revoked-refresh-token",
+		ExpiresAt:  time.Now().Add(24 * time.Hour),
+		DeviceInfo: "Chrome on macOS",
+		IP:         "127.0.0.1",
+		RevokedAt:  &now,
+	}
+	tokenRepo.(*mockTokenRepository).tokens[revokedToken.Token] = revokedToken
+
+	tests := []struct {
+		name       string
+		token      string
+		deviceInfo string
+		ip         string
+		wantErr    bool
+	}{
+		{
+			name:       "Valid refresh token",
+			token:      "valid-refresh-token",
+			deviceInfo: "Chrome on macOS",
+			ip:         "127.0.0.1",
+			wantErr:    false,
+		},
+		{
+			name:       "Invalid refresh token",
+			token:      "invalid-refresh-token",
+			deviceInfo: "Chrome on macOS",
+			ip:         "127.0.0.1",
+			wantErr:    true,
+		},
+		{
+			name:       "Expired refresh token",
+			token:      "expired-refresh-token",
+			deviceInfo: "Chrome on macOS",
+			ip:         "127.0.0.1",
+			wantErr:    true,
+		},
+		{
+			name:       "Revoked refresh token",
+			token:      "revoked-refresh-token",
+			deviceInfo: "Chrome on macOS",
+			ip:         "127.0.0.1",
+			wantErr:    true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			accessToken, newRefreshToken, err := service.RefreshToken(tt.token, tt.deviceInfo, tt.ip)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("AuthService.RefreshToken() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr {
+				if accessToken == "" {
+					t.Error("AuthService.RefreshToken() returned empty access token for valid refresh token")
+				}
+				if newRefreshToken == "" {
+					t.Error("AuthService.RefreshToken() returned empty refresh token for valid refresh token")
+				}
+				if newRefreshToken == tt.token {
+					t.Error("AuthService.RefreshToken() returned same refresh token instead of rotating it")
+				}
+			}
+		})
+	}
+}
+
+func TestAuthServiceRevokeToken(t *testing.T) {
+	userRepo := newMockUserRepository()
+	tokenRepo := newMockTokenRepository()
+	cfg := &config.Config{
+		JWTSecret: "test-secret",
+		JWTExpiry: 24 * time.Hour,
+	}
+	lockoutService := newMockAccountLockoutService()
+	service := NewAuthService(userRepo, tokenRepo, cfg, lockoutService)
+
+	// Create a valid refresh token
+	validToken := &models.RefreshToken{
+		UserID:     1,
+		Token:      "valid-refresh-token",
+		ExpiresAt:  time.Now().Add(24 * time.Hour),
+		DeviceInfo: "Chrome on macOS",
+		IP:         "127.0.0.1",
+	}
+	tokenRepo.(*mockTokenRepository).tokens[validToken.Token] = validToken
+
+	tests := []struct {
+		name    string
+		token   string
+		wantErr bool
+	}{
+		{
+			name:    "Valid token",
+			token:   "valid-refresh-token",
+			wantErr: false,
+		},
+		{
+			name:    "Invalid token",
+			token:   "invalid-refresh-token",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := service.RevokeToken(tt.token)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("AuthService.RevokeToken() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr {
+				token, _ := tokenRepo.(*mockTokenRepository).GetRefreshToken(tt.token)
+				if token.RevokedAt == nil {
+					t.Error("AuthService.RevokeToken() did not revoke the token")
+				}
 			}
 		})
 	}

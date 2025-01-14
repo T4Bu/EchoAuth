@@ -32,8 +32,8 @@ func NewAuthController(authService AuthService) *AuthController {
 }
 
 type RegisterRequest struct {
-	Email     string `json:"email"`
-	Password  string `json:"password"`
+	Email     string `json:"email" validate:"required,email"`
+	Password  string `json:"password" validate:"required"`
 	FirstName string `json:"first_name"`
 	LastName  string `json:"last_name"`
 }
@@ -64,23 +64,26 @@ var validate = validator.New()
 func (ac *AuthController) Register(w http.ResponseWriter, r *http.Request) {
 	var req RegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		response.JSONError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	// Validate request
-	if req.Email == "" {
-		http.Error(w, "Email is required", http.StatusBadRequest)
+	if err := validate.Struct(req); err != nil {
+		response.JSONError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	err := ac.authService.Register(req.Email, req.Password, req.FirstName, req.LastName)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		if err.Error() == "user already exists" {
+			response.JSONError(w, err.Error(), http.StatusConflict)
+			return
+		}
+		response.JSONError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	w.WriteHeader(http.StatusCreated)
+	response.JSONResponse(w, map[string]string{"message": "User registered successfully"}, http.StatusCreated)
 }
 
 func (ac *AuthController) Login(w http.ResponseWriter, r *http.Request) {

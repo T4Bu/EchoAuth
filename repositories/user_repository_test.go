@@ -22,7 +22,7 @@ func TestMain(m *testing.M) {
 	}
 
 	// Migrate the schema
-	err = db.AutoMigrate(&models.User{})
+	err = db.AutoMigrate(&models.User{}, &models.RefreshToken{})
 	if err != nil {
 		fmt.Printf("Failed to migrate test database: %v\n", err)
 		os.Exit(1)

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 type mockAuthService struct{}
@@ -33,6 +34,22 @@ func (m *mockAuthService) Logout(token string) error {
 		return nil
 	}
 	return errors.New("invalid token")
+}
+
+func (m *mockAuthService) GetJWTExpiry() time.Duration {
+	return 24 * time.Hour
+}
+
+func (m *mockAuthService) LoginWithRefresh(email, password, deviceInfo, ip string) (string, string, error) {
+	return "", "", nil
+}
+
+func (m *mockAuthService) RefreshToken(refreshToken, deviceInfo, ip string) (string, string, error) {
+	return "", "", nil
+}
+
+func (m *mockAuthService) GetUserByEmail(email string) (*models.User, error) {
+	return nil, nil
 }
 
 func TestAuthMiddleware(t *testing.T) {

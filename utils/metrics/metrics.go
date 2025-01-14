@@ -1,42 +1,22 @@
 package metrics
 
 import (
+	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 var (
-	AuthAttempts = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "auth_attempts_total",
-			Help: "Total number of authentication attempts by type and result",
-		},
-		[]string{"type", "result"},
-	)
-
-	ActiveSessions = prometheus.NewGauge(
-		prometheus.GaugeOpts{
-			Name: "active_sessions",
-			Help: "Number of currently active sessions",
-		},
-	)
-
-	RateLimitHits = prometheus.NewCounter(
-		prometheus.CounterOpts{
-			Name: "rate_limit_hits_total",
-			Help: "Total number of rate limit hits",
-		},
-	)
-
 	RequestDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "http_request_duration_seconds",
 			Help:    "Duration of HTTP requests in seconds",
 			Buckets: prometheus.DefBuckets,
 		},
-		[]string{"path", "method", "status"},
+		[]string{"path", "method", "status_code"},
 	)
 
 	DatabaseOperations = prometheus.NewCounterVec(
@@ -46,32 +26,85 @@ var (
 		},
 		[]string{"operation", "status"},
 	)
+
+	AuthenticationAttempts = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "authentication_attempts_total",
+			Help: "Total number of authentication attempts",
+		},
+		[]string{"status"},
+	)
+
+	ActiveTokens = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "active_tokens",
+			Help: "Number of currently active tokens",
+		},
+	)
+
+	RateLimitHits = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "rate_limit_hits_total",
+			Help: "Total number of rate limit hits",
+		},
+	)
 )
 
 func init() {
-	prometheus.MustRegister(AuthAttempts)
-	prometheus.MustRegister(ActiveSessions)
-	prometheus.MustRegister(RateLimitHits)
 	prometheus.MustRegister(RequestDuration)
 	prometheus.MustRegister(DatabaseOperations)
+	prometheus.MustRegister(AuthenticationAttempts)
+	prometheus.MustRegister(ActiveTokens)
+	prometheus.MustRegister(RateLimitHits)
 }
 
-func RecordAuthAttempt(attemptType, result string) {
-	AuthAttempts.WithLabelValues(attemptType, result).Inc()
+// RecordRequestDuration is middleware that records the duration of HTTP requests
+func RecordRequestDuration(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, Status: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		duration := time.Since(start).Seconds()
+		RequestDuration.WithLabelValues(r.URL.Path, r.Method, strconv.Itoa(rec.Status)).Observe(duration)
+	})
 }
 
-func UpdateActiveSessions(delta int) {
-	ActiveSessions.Add(float64(delta))
+// statusRecorder wraps http.ResponseWriter to capture status code
+type statusRecorder struct {
+	http.ResponseWriter
+	Status int
 }
 
+func (r *statusRecorder) WriteHeader(status int) {
+	r.Status = status
+	r.ResponseWriter.WriteHeader(status)
+}
+
+// RecordDatabaseOperation records a database operation with its status
+func RecordDatabaseOperation(operation, status string) {
+	DatabaseOperations.WithLabelValues(operation, status).Inc()
+}
+
+// RecordAuthenticationAttempt records an authentication attempt
+func RecordAuthenticationAttempt(success bool) {
+	status := "success"
+	if !success {
+		status = "failure"
+	}
+	AuthenticationAttempts.WithLabelValues(status).Inc()
+}
+
+// RecordActiveTokens sets the current number of active tokens
+func RecordActiveTokens(count int) {
+	ActiveTokens.Set(float64(count))
+}
+
+// RecordRateLimitHit increments the rate limit hits counter
 func RecordRateLimitHit() {
 	RateLimitHits.Inc()
 }
 
-func RecordRequestDuration(path, method string, status int, duration time.Duration) {
-	RequestDuration.WithLabelValues(path, method, strconv.Itoa(status)).Observe(duration.Seconds())
-}
-
-func RecordDatabaseOperation(operation, status string) {
-	DatabaseOperations.WithLabelValues(operation, status).Inc()
+// Handler returns an HTTP handler for the metrics endpoint
+func Handler() http.Handler {
+	return promhttp.Handler()
 }

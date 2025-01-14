@@ -5,7 +5,6 @@ import (
 	"EchoAuth/controllers"
 	"EchoAuth/database"
 	"EchoAuth/middlewares"
-	"EchoAuth/models"
 	"EchoAuth/repositories"
 	"EchoAuth/services"
 	"EchoAuth/utils/logger"
@@ -13,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -20,7 +20,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
-	"gorm.io/gorm"
 )
 
 // Dependencies holds all service dependencies
@@ -30,15 +29,15 @@ type Dependencies struct {
 	LockoutSvc  *services.AccountLockoutService
 	AuthService controllers.AuthService
 	RedisClient *redis.Client
-	DB          *gorm.DB
+	DB          *database.DB
 }
 
 // NewDependencies creates a new Dependencies instance
-func NewDependencies(db *gorm.DB, redisClient *redis.Client, cfg *config.Config) *Dependencies {
+func NewDependencies(db *database.DB, redisClient *redis.Client, cfg *config.Config) *Dependencies {
 	userRepo := repositories.NewUserRepository(db)
 	tokenRepo := repositories.NewTokenRepository(db)
 	lockoutSvc := services.NewAccountLockoutService(redisClient)
-	authService := services.NewAuthService(userRepo, tokenRepo, cfg, lockoutSvc)
+	authService := services.NewAuthService(userRepo, tokenRepo, cfg, lockoutSvc, redisClient)
 
 	return &Dependencies{
 		UserRepo:    userRepo,
@@ -55,17 +54,20 @@ func initLogger() zerolog.Logger {
 	return logger.GetLogger("main")
 }
 
-func initDatabase(cfg *config.Config, log zerolog.Logger) *gorm.DB {
+func initDatabase(cfg *config.Config, log zerolog.Logger) *database.DB {
 	db, err := database.InitDB(cfg.DatabaseURL)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to initialize database")
 	}
 
-	err = db.AutoMigrate(&models.User{})
-	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to migrate database schema")
+	// Apply migrations
+	log.Info().Msg("Applying database migrations...")
+	migrationsDir := filepath.Join(".", "migrations")
+	if err := db.Migrate(migrationsDir); err != nil {
+		log.Fatal().Err(err).Msg("Failed to apply database migrations")
 	}
-	log.Info().Msg("Database schema migrated successfully")
+	log.Info().Msg("Database migrations applied successfully")
+
 	return db
 }
 
@@ -165,13 +167,8 @@ func startServer(router *mux.Router, cfg *config.Config, log zerolog.Logger, dep
 	}
 
 	// Close database connection
-	sqlDB, err := deps.DB.DB()
-	if err != nil {
-		log.Error().Err(err).Msg("Failed to get database instance")
-	} else {
-		if err := sqlDB.Close(); err != nil {
-			log.Error().Err(err).Msg("Error closing database connection")
-		}
+	if err := deps.DB.Close(); err != nil {
+		log.Error().Err(err).Msg("Error closing database connection")
 	}
 
 	// Close Redis connection

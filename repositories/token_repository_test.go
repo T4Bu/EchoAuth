@@ -1,201 +1,182 @@
 package repositories
 
 import (
+	"EchoAuth/database"
 	"EchoAuth/models"
+	"database/sql"
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
-	"gorm.io/gorm"
 )
 
-func setupTokenTest() (*TokenRepository, func()) {
-	// Clear the database before each test
-	testDB.Exec("DELETE FROM refresh_tokens")
-
-	repo := NewTokenRepository(testDB)
-
-	return repo, func() {
-		testDB.Exec("DELETE FROM refresh_tokens")
+func setupTokenTestDB(t *testing.T) (*database.DB, sqlmock.Sqlmock) {
+	mockDB, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("Failed to create mock database: %v", err)
 	}
+
+	db := &database.DB{DB: mockDB}
+	return db, mock
 }
 
-func TestCreateRefreshToken(t *testing.T) {
-	repo, cleanup := setupTokenTest()
-	defer cleanup()
+func TestTokenRepository_CreateRefreshToken(t *testing.T) {
+	db, mock := setupTokenTestDB(t)
+	defer db.Close()
 
-	token := "test-token"
+	repo := NewTokenRepository(db)
 	userID := uint(1)
+	token := "test-token"
+	expiresAt := time.Now().Add(24 * time.Hour)
 	deviceInfo := "test-device"
 	ip := "127.0.0.1"
-	expiresAt := time.Now().Add(24 * time.Hour)
+
+	mock.ExpectExec(`INSERT INTO refresh_tokens`).
+		WithArgs(sqlmock.AnyArg(), userID, token, expiresAt, deviceInfo, ip,
+			sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	refreshToken, err := repo.CreateRefreshToken(userID, token, expiresAt, deviceInfo, ip)
 	assert.NoError(t, err)
 	assert.NotNil(t, refreshToken)
+	assert.Equal(t, userID, refreshToken.UserID)
+	assert.Equal(t, token, refreshToken.Token)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestTokenRepository_GetRefreshToken(t *testing.T) {
+	db, mock := setupTokenTestDB(t)
+	defer db.Close()
+
+	repo := NewTokenRepository(db)
+	token := "test-token"
+	tokenID := uuid.New()
+	userID := uint(1)
+	now := time.Now()
+	expiresAt := now.Add(24 * time.Hour)
+
+	mock.ExpectQuery(`SELECT .+ FROM refresh_tokens WHERE token = \$1`).
+		WithArgs(token).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "user_id", "token", "used", "revoked_at", "expires_at",
+			"created_at", "updated_at", "previous_id", "device_info", "ip",
+		}).AddRow(
+			tokenID, userID, token, false, nil, expiresAt,
+			now, now, nil, "test-device", "127.0.0.1",
+		))
+
+	refreshToken, err := repo.GetRefreshToken(token)
+	assert.NoError(t, err)
+	assert.NotNil(t, refreshToken)
 	assert.Equal(t, token, refreshToken.Token)
 	assert.Equal(t, userID, refreshToken.UserID)
-	assert.Equal(t, deviceInfo, refreshToken.DeviceInfo)
-	assert.Equal(t, ip, refreshToken.IP)
-	assert.False(t, refreshToken.Used)
-	assert.Nil(t, refreshToken.RevokedAt)
+	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestGetRefreshToken(t *testing.T) {
-	repo, cleanup := setupTokenTest()
-	defer cleanup()
+func TestTokenRepository_GetRefreshToken_NotFound(t *testing.T) {
+	db, mock := setupTokenTestDB(t)
+	defer db.Close()
 
-	// Create a test token
-	token := "test-token"
-	userID := uint(1)
-	deviceInfo := "test-device"
-	ip := "127.0.0.1"
-	expiresAt := time.Now().Add(24 * time.Hour)
+	repo := NewTokenRepository(db)
+	token := "nonexistent-token"
 
-	created, err := repo.CreateRefreshToken(userID, token, expiresAt, deviceInfo, ip)
-	assert.NoError(t, err)
+	mock.ExpectQuery(`SELECT .+ FROM refresh_tokens WHERE token = \$1`).
+		WithArgs(token).
+		WillReturnError(sql.ErrNoRows)
 
-	// Test getting the token
-	found, err := repo.GetRefreshToken(token)
-	assert.NoError(t, err)
-	assert.NotNil(t, found)
-	assert.Equal(t, created.ID, found.ID)
-	assert.Equal(t, token, found.Token)
-
-	// Test getting non-existent token
-	found, err = repo.GetRefreshToken("non-existent")
+	refreshToken, err := repo.GetRefreshToken(token)
 	assert.Error(t, err)
-	assert.Nil(t, found)
-	assert.Equal(t, gorm.ErrRecordNotFound, err)
+	assert.Equal(t, ErrNotFound, err)
+	assert.Nil(t, refreshToken)
+	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestRotateRefreshToken(t *testing.T) {
-	repo, cleanup := setupTokenTest()
-	defer cleanup()
+func TestTokenRepository_RotateRefreshToken(t *testing.T) {
+	db, mock := setupTokenTestDB(t)
+	defer db.Close()
 
-	// Create initial token
-	token := "test-token"
-	userID := uint(1)
-	deviceInfo := "test-device"
-	ip := "127.0.0.1"
-	expiresAt := time.Now().Add(24 * time.Hour)
-
-	currentToken, err := repo.CreateRefreshToken(userID, token, expiresAt, deviceInfo, ip)
-	assert.NoError(t, err)
-
-	// Rotate token
-	newToken := "new-test-token"
-	newExpiresAt := time.Now().Add(48 * time.Hour)
-
-	rotated, err := repo.RotateRefreshToken(currentToken, newToken, newExpiresAt)
-	assert.NoError(t, err)
-	assert.NotNil(t, rotated)
-	assert.Equal(t, newToken, rotated.Token)
-	assert.Equal(t, currentToken.UserID, rotated.UserID)
-	assert.Equal(t, currentToken.DeviceInfo, rotated.DeviceInfo)
-	assert.Equal(t, currentToken.IP, rotated.IP)
-	assert.Equal(t, currentToken.ID, *rotated.PreviousID)
-
-	// Verify old token is marked as used
-	oldToken, err := repo.GetRefreshToken(token)
-	assert.NoError(t, err)
-	assert.True(t, oldToken.Used)
-}
-
-func TestRevokeRefreshToken(t *testing.T) {
-	repo, cleanup := setupTokenTest()
-	defer cleanup()
-
-	// Create a test token
-	token := "test-token"
-	userID := uint(1)
-	deviceInfo := "test-device"
-	ip := "127.0.0.1"
-	expiresAt := time.Now().Add(24 * time.Hour)
-
-	_, err := repo.CreateRefreshToken(userID, token, expiresAt, deviceInfo, ip)
-	assert.NoError(t, err)
-
-	// Revoke token
-	err = repo.RevokeRefreshToken(token)
-	assert.NoError(t, err)
-
-	// Verify token is revoked
-	found, err := repo.GetRefreshToken(token)
-	assert.NoError(t, err)
-	assert.NotNil(t, found.RevokedAt)
-}
-
-func TestRevokeAllUserTokens(t *testing.T) {
-	repo, cleanup := setupTokenTest()
-	defer cleanup()
-
-	userID := uint(1)
-	deviceInfo := "test-device"
-	ip := "127.0.0.1"
-	expiresAt := time.Now().Add(24 * time.Hour)
-
-	// Create multiple tokens for the same user
-	tokens := []string{"token1", "token2", "token3"}
-	for _, token := range tokens {
-		_, err := repo.CreateRefreshToken(userID, token, expiresAt, deviceInfo, ip)
-		assert.NoError(t, err)
+	repo := NewTokenRepository(db)
+	currentToken := &models.RefreshToken{
+		ID:         uuid.New(),
+		UserID:     1,
+		Token:      "old-token",
+		DeviceInfo: "test-device",
+		IP:         "127.0.0.1",
 	}
+	newTokenStr := "new-token"
+	expiresAt := time.Now().Add(24 * time.Hour)
 
-	// Revoke all tokens
+	// Expect transaction
+	mock.ExpectBegin()
+
+	// Expect update of current token
+	mock.ExpectExec(`UPDATE refresh_tokens SET used = true, updated_at = \$1 WHERE id = \$2`).
+		WithArgs(sqlmock.AnyArg(), currentToken.ID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	// Expect insert of new token
+	mock.ExpectExec(`INSERT INTO refresh_tokens`).
+		WithArgs(sqlmock.AnyArg(), currentToken.UserID, newTokenStr, expiresAt,
+			currentToken.ID, currentToken.DeviceInfo, currentToken.IP,
+			sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	mock.ExpectCommit()
+
+	newToken, err := repo.RotateRefreshToken(currentToken, newTokenStr, expiresAt)
+	assert.NoError(t, err)
+	assert.NotNil(t, newToken)
+	assert.Equal(t, newTokenStr, newToken.Token)
+	assert.Equal(t, currentToken.UserID, newToken.UserID)
+	assert.Equal(t, &currentToken.ID, newToken.PreviousID)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestTokenRepository_RevokeRefreshToken(t *testing.T) {
+	db, mock := setupTokenTestDB(t)
+	defer db.Close()
+
+	repo := NewTokenRepository(db)
+	token := "test-token"
+
+	mock.ExpectExec(`UPDATE refresh_tokens SET revoked_at = \$1, updated_at = \$2 WHERE token = \$3`).
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), token).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	err := repo.RevokeRefreshToken(token)
+	assert.NoError(t, err)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestTokenRepository_RevokeAllUserTokens(t *testing.T) {
+	db, mock := setupTokenTestDB(t)
+	defer db.Close()
+
+	repo := NewTokenRepository(db)
+	userID := uint(1)
+
+	mock.ExpectExec(`UPDATE refresh_tokens SET revoked_at = \$1, updated_at = \$2 WHERE user_id = \$3`).
+		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), userID).
+		WillReturnResult(sqlmock.NewResult(0, 2))
+
 	err := repo.RevokeAllUserTokens(userID)
 	assert.NoError(t, err)
-
-	// Verify all tokens are revoked
-	for _, token := range tokens {
-		found, err := repo.GetRefreshToken(token)
-		assert.NoError(t, err)
-		assert.NotNil(t, found.RevokedAt)
-	}
+	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestCleanupExpiredTokens(t *testing.T) {
-	repo, cleanup := setupTokenTest()
-	defer cleanup()
+func TestTokenRepository_CleanupExpiredTokens(t *testing.T) {
+	db, mock := setupTokenTestDB(t)
+	defer db.Close()
 
-	userID := uint(1)
-	deviceInfo := "test-device"
-	ip := "127.0.0.1"
+	repo := NewTokenRepository(db)
 
-	// Create expired token
-	expiredToken := "expired-token"
-	expiredAt := time.Now().Add(-24 * time.Hour)
-	_, err := repo.CreateRefreshToken(userID, expiredToken, expiredAt, deviceInfo, ip)
+	mock.ExpectExec(`DELETE FROM refresh_tokens WHERE expires_at < \$1 OR used = true`).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 5))
+
+	err := repo.CleanupExpiredTokens()
 	assert.NoError(t, err)
-
-	// Create valid token
-	validToken := "valid-token"
-	validExpiresAt := time.Now().Add(24 * time.Hour)
-	_, err = repo.CreateRefreshToken(userID, validToken, validExpiresAt, deviceInfo, ip)
-	assert.NoError(t, err)
-
-	// Create used token
-	usedToken := "used-token"
-	_, err = repo.CreateRefreshToken(userID, usedToken, validExpiresAt, deviceInfo, ip)
-	assert.NoError(t, err)
-	err = testDB.Model(&models.RefreshToken{}).Where("token = ?", usedToken).Update("used", true).Error
-	assert.NoError(t, err)
-
-	// Cleanup expired and used tokens
-	err = repo.CleanupExpiredTokens()
-	assert.NoError(t, err)
-
-	// Verify expired and used tokens are deleted
-	_, err = repo.GetRefreshToken(expiredToken)
-	assert.Error(t, err)
-	assert.Equal(t, gorm.ErrRecordNotFound, err)
-
-	_, err = repo.GetRefreshToken(usedToken)
-	assert.Error(t, err)
-	assert.Equal(t, gorm.ErrRecordNotFound, err)
-
-	// Verify valid token still exists
-	validFound, err := repo.GetRefreshToken(validToken)
-	assert.NoError(t, err)
-	assert.NotNil(t, validFound)
+	assert.NoError(t, mock.ExpectationsWereMet())
 }

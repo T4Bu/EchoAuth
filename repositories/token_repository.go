@@ -1,10 +1,12 @@
 package repositories
 
 import (
+	"EchoAuth/database"
 	"EchoAuth/models"
+	"database/sql"
 	"time"
 
-	"gorm.io/gorm"
+	"github.com/google/uuid"
 )
 
 type TokenRepositoryInterface interface {
@@ -17,24 +19,36 @@ type TokenRepositoryInterface interface {
 }
 
 type TokenRepository struct {
-	db *gorm.DB
+	db *database.DB
 }
 
-func NewTokenRepository(db *gorm.DB) *TokenRepository {
+func NewTokenRepository(db *database.DB) *TokenRepository {
 	return &TokenRepository{db: db}
 }
 
 // CreateRefreshToken creates a new refresh token for a user
 func (r *TokenRepository) CreateRefreshToken(userID uint, token string, expiresAt time.Time, deviceInfo, ip string) (*models.RefreshToken, error) {
 	refreshToken := &models.RefreshToken{
+		ID:         uuid.New(),
 		UserID:     userID,
 		Token:      token,
 		ExpiresAt:  expiresAt,
 		DeviceInfo: deviceInfo,
 		IP:         ip,
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
 	}
 
-	if err := r.db.Create(refreshToken).Error; err != nil {
+	query := `
+		INSERT INTO refresh_tokens (id, user_id, token, expires_at, device_info, ip, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
+
+	_, err := r.db.Exec(query,
+		refreshToken.ID, refreshToken.UserID, refreshToken.Token,
+		refreshToken.ExpiresAt, refreshToken.DeviceInfo, refreshToken.IP,
+		refreshToken.CreatedAt, refreshToken.UpdatedAt)
+
+	if err != nil {
 		return nil, err
 	}
 	return refreshToken, nil
@@ -42,62 +56,126 @@ func (r *TokenRepository) CreateRefreshToken(userID uint, token string, expiresA
 
 // GetRefreshToken retrieves a refresh token by its token string
 func (r *TokenRepository) GetRefreshToken(token string) (*models.RefreshToken, error) {
-	var refreshToken models.RefreshToken
-	if err := r.db.Where("token = ?", token).First(&refreshToken).Error; err != nil {
+	refreshToken := &models.RefreshToken{}
+	query := `
+		SELECT id, user_id, token, used, revoked_at, expires_at, created_at, updated_at,
+			previous_id, device_info, ip
+		FROM refresh_tokens
+		WHERE token = $1`
+
+	err := r.db.QueryRow(query, token).Scan(
+		&refreshToken.ID, &refreshToken.UserID, &refreshToken.Token,
+		&refreshToken.Used, &refreshToken.RevokedAt, &refreshToken.ExpiresAt,
+		&refreshToken.CreatedAt, &refreshToken.UpdatedAt,
+		&refreshToken.PreviousID, &refreshToken.DeviceInfo, &refreshToken.IP)
+
+	if err == sql.ErrNoRows {
+		return nil, ErrNotFound
+	}
+	if err != nil {
 		return nil, err
 	}
-	return &refreshToken, nil
+	return refreshToken, nil
 }
 
 // RotateRefreshToken marks the current token as used and creates a new one
 func (r *TokenRepository) RotateRefreshToken(currentToken *models.RefreshToken, newToken string, expiresAt time.Time) (*models.RefreshToken, error) {
-	var result *models.RefreshToken
-	err := r.db.Transaction(func(tx *gorm.DB) error {
-		// Mark current token as used
-		currentToken.Used = true
-		if err := tx.Save(currentToken).Error; err != nil {
-			return err
-		}
+	tx, err := r.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
 
-		// Create new token with reference to the previous one
-		newRefreshToken := &models.RefreshToken{
-			UserID:     currentToken.UserID,
-			Token:      newToken,
-			ExpiresAt:  expiresAt,
-			PreviousID: &currentToken.ID,
-			DeviceInfo: currentToken.DeviceInfo,
-			IP:         currentToken.IP,
-		}
+	// Mark current token as used
+	updateQuery := `
+		UPDATE refresh_tokens
+		SET used = true, updated_at = $1
+		WHERE id = $2`
 
-		if err := tx.Create(newRefreshToken).Error; err != nil {
-			return err
-		}
+	now := time.Now()
+	_, err = tx.Exec(updateQuery, now, currentToken.ID)
+	if err != nil {
+		return nil, err
+	}
 
-		result = newRefreshToken
-		return nil
-	})
+	// Create new token with reference to the previous one
+	newRefreshToken := &models.RefreshToken{
+		ID:         uuid.New(),
+		UserID:     currentToken.UserID,
+		Token:      newToken,
+		ExpiresAt:  expiresAt,
+		PreviousID: &currentToken.ID,
+		DeviceInfo: currentToken.DeviceInfo,
+		IP:         currentToken.IP,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
 
-	return result, err
+	insertQuery := `
+		INSERT INTO refresh_tokens (id, user_id, token, expires_at, previous_id, device_info, ip, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`
+
+	_, err = tx.Exec(insertQuery,
+		newRefreshToken.ID, newRefreshToken.UserID, newRefreshToken.Token,
+		newRefreshToken.ExpiresAt, newRefreshToken.PreviousID,
+		newRefreshToken.DeviceInfo, newRefreshToken.IP,
+		newRefreshToken.CreatedAt, newRefreshToken.UpdatedAt)
+
+	if err != nil {
+		return nil, err
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		return nil, err
+	}
+
+	return newRefreshToken, nil
 }
 
 // RevokeRefreshToken marks a refresh token as revoked
 func (r *TokenRepository) RevokeRefreshToken(token string) error {
 	now := time.Now()
-	return r.db.Model(&models.RefreshToken{}).
-		Where("token = ?", token).
-		Update("revoked_at", &now).Error
+	query := `
+		UPDATE refresh_tokens
+		SET revoked_at = $1, updated_at = $2
+		WHERE token = $3`
+
+	result, err := r.db.Exec(query, now, now, token)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if rowsAffected == 0 {
+		return ErrNotFound
+	}
+
+	return nil
 }
 
 // RevokeAllUserTokens revokes all refresh tokens for a user
 func (r *TokenRepository) RevokeAllUserTokens(userID uint) error {
 	now := time.Now()
-	return r.db.Model(&models.RefreshToken{}).
-		Where("user_id = ? AND revoked_at IS NULL", userID).
-		Update("revoked_at", &now).Error
+	query := `
+		UPDATE refresh_tokens
+		SET revoked_at = $1, updated_at = $2
+		WHERE user_id = $3 AND revoked_at IS NULL`
+
+	_, err := r.db.Exec(query, now, now, userID)
+	return err
 }
 
 // CleanupExpiredTokens removes expired and used tokens
 func (r *TokenRepository) CleanupExpiredTokens() error {
-	return r.db.Where("expires_at < ? OR used = ?", time.Now(), true).
-		Delete(&models.RefreshToken{}).Error
+	query := `
+		DELETE FROM refresh_tokens
+		WHERE expires_at < $1 OR used = true`
+
+	_, err := r.db.Exec(query, time.Now())
+	return err
 }

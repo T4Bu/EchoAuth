@@ -169,7 +169,8 @@ func TestAuthServiceRegister(t *testing.T) {
 	tokenRepo := repositories.NewTokenRepository(nil)
 	cfg := &config.Config{JWTSecret: "test-secret", JWTExpiry: 24 * time.Hour}
 	lockoutService := newMockAccountLockoutService()
-	service := NewAuthService(repo, tokenRepo, cfg, lockoutService)
+	redisClient := newMockRedis()
+	service := NewAuthService(repo, tokenRepo, cfg, lockoutService, redisClient)
 
 	tests := []struct {
 		name      string
@@ -269,7 +270,8 @@ func TestAuthServiceLogin(t *testing.T) {
 	tokenRepo := repositories.NewTokenRepository(nil)
 	cfg := &config.Config{JWTSecret: "test-secret", JWTExpiry: 24 * time.Hour}
 	lockoutService := newMockAccountLockoutService()
-	service := NewAuthService(repo, tokenRepo, cfg, lockoutService)
+	redisClient := newMockRedis()
+	service := NewAuthService(repo, tokenRepo, cfg, lockoutService, redisClient)
 
 	// Create a test user
 	testUser := &models.User{
@@ -326,7 +328,8 @@ func TestAuthServiceValidateToken(t *testing.T) {
 	tokenRepo := repositories.NewTokenRepository(nil)
 	cfg := &config.Config{JWTSecret: "test-secret", JWTExpiry: 24 * time.Hour}
 	lockoutService := newMockAccountLockoutService()
-	service := NewAuthService(repo, tokenRepo, cfg, lockoutService)
+	redisClient := newMockRedis()
+	service := NewAuthService(repo, tokenRepo, cfg, lockoutService, redisClient)
 
 	// Create a valid token
 	claims := &models.TokenClaims{
@@ -399,7 +402,8 @@ func TestAuthServiceLoginWithRefresh(t *testing.T) {
 		JWTExpiry: 24 * time.Hour,
 	}
 	lockoutService := newMockAccountLockoutService()
-	service := NewAuthService(userRepo, tokenRepo, cfg, lockoutService)
+	redisClient := newMockRedis()
+	service := NewAuthService(userRepo, tokenRepo, cfg, lockoutService, redisClient)
 
 	// Create a test user
 	testUser := &models.User{
@@ -472,7 +476,8 @@ func TestAuthServiceRefreshToken(t *testing.T) {
 		JWTExpiry: 24 * time.Hour,
 	}
 	lockoutService := newMockAccountLockoutService()
-	service := NewAuthService(userRepo, tokenRepo, cfg, lockoutService)
+	redisClient := newMockRedis()
+	service := NewAuthService(userRepo, tokenRepo, cfg, lockoutService, redisClient)
 
 	// Create a test user
 	testUser := &models.User{
@@ -583,7 +588,8 @@ func TestAuthServiceRevokeToken(t *testing.T) {
 		JWTExpiry: 24 * time.Hour,
 	}
 	lockoutService := newMockAccountLockoutService()
-	service := NewAuthService(userRepo, tokenRepo, cfg, lockoutService)
+	redisClient := newMockRedis()
+	service := NewAuthService(userRepo, tokenRepo, cfg, lockoutService, redisClient)
 
 	// Create a valid refresh token
 	validToken := &models.RefreshToken{

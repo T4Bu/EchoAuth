@@ -1,16 +1,36 @@
 package database
 
 import (
+	"database/sql"
 	"fmt"
 
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
+	_ "github.com/lib/pq"
 )
 
-func InitDB(databaseURL string) (*gorm.DB, error) {
-	db, err := gorm.Open(postgres.Open(databaseURL), &gorm.Config{})
-	if err != nil {
-		panic(fmt.Sprintf("Failed to connect to database: %v", err))
+// DB represents a database connection
+type DB struct {
+	*sql.DB
+}
+
+// InitDB initializes a database connection with the given URL
+func InitDB(databaseURL string) (*DB, error) {
+	if databaseURL == "" {
+		return nil, fmt.Errorf("database URL cannot be empty")
 	}
-	return db, nil
+
+	db, err := sql.Open("postgres", databaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to database: %v", err)
+	}
+
+	// Verify the connection
+	if err := db.Ping(); err != nil {
+		return nil, fmt.Errorf("failed to ping database: %v", err)
+	}
+
+	// Set connection pool settings
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(5)
+
+	return &DB{db}, nil
 }

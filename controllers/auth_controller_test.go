@@ -61,6 +61,11 @@ func (m *mockAuthService) GetUserByEmail(email string) (*models.User, error) {
 	return args.Get(0).(*models.User), args.Error(1)
 }
 
+func (m *mockAuthService) LogoutWithRefresh(token string) error {
+	args := m.Called(token)
+	return args.Error(0)
+}
+
 func TestAuthControllerRegister(t *testing.T) {
 	tests := []struct {
 		name           string
@@ -252,6 +257,7 @@ func TestAuthControllerLogout(t *testing.T) {
 	tests := []struct {
 		name           string
 		requestBody    interface{}
+		setupAuth      string
 		setupMock      func(mockService *mockAuthService)
 		expectedStatus int
 		expectedBody   string
@@ -261,8 +267,10 @@ func TestAuthControllerLogout(t *testing.T) {
 			requestBody: RefreshTokenRequest{
 				RefreshToken: "test-refresh-token",
 			},
+			setupAuth: "Bearer test-access-token",
 			setupMock: func(mockService *mockAuthService) {
-				mockService.On("Logout", "test-refresh-token").Return(nil)
+				mockService.On("Logout", "test-access-token").Return(nil)
+				mockService.On("LogoutWithRefresh", "test-refresh-token").Return(nil)
 			},
 			expectedStatus: http.StatusOK,
 			expectedBody:   `{"message":"Successfully logged out"}`,
@@ -270,20 +278,20 @@ func TestAuthControllerLogout(t *testing.T) {
 		{
 			name:           "Invalid request body",
 			requestBody:    "invalid json",
+			setupAuth:      "Bearer test-access-token",
 			setupMock:      func(mockService *mockAuthService) {},
 			expectedStatus: http.StatusBadRequest,
 			expectedBody:   `{"error":"Invalid request body"}`,
 		},
 		{
-			name: "Logout error",
+			name: "Missing auth header",
 			requestBody: RefreshTokenRequest{
-				RefreshToken: "invalid-token",
+				RefreshToken: "test-refresh-token",
 			},
-			setupMock: func(mockService *mockAuthService) {
-				mockService.On("Logout", "invalid-token").Return(errors.New("failed to logout"))
-			},
-			expectedStatus: http.StatusInternalServerError,
-			expectedBody:   `{"error":"Failed to logout"}`,
+			setupAuth:      "",
+			setupMock:      func(mockService *mockAuthService) {},
+			expectedStatus: http.StatusUnauthorized,
+			expectedBody:   `{"error":"Authorization header required"}`,
 		},
 	}
 
@@ -303,6 +311,9 @@ func TestAuthControllerLogout(t *testing.T) {
 			}
 
 			req := httptest.NewRequest(http.MethodPost, "/auth/logout", bytes.NewReader(body))
+			if tt.setupAuth != "" {
+				req.Header.Set("Authorization", tt.setupAuth)
+			}
 			w := httptest.NewRecorder()
 
 			controller.Logout(w, req)

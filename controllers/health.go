@@ -1,26 +1,21 @@
 package controllers
 
 import (
+	"EchoAuth/database"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"net/http"
 	"time"
 
 	"github.com/redis/go-redis/v9"
-	"gorm.io/gorm"
 )
-
-type DBInterface interface {
-	DB() (*sql.DB, error)
-}
 
 type RedisInterface interface {
 	Ping(ctx context.Context) *redis.StatusCmd
 }
 
 type HealthController struct {
-	db    DBInterface
+	db    *database.DB
 	redis RedisInterface
 }
 
@@ -30,18 +25,9 @@ type HealthResponse struct {
 	Services  map[string]string `json:"services"`
 }
 
-// gormDBAdapter adapts *gorm.DB to DBInterface
-type gormDBAdapter struct {
-	gormDB *gorm.DB
-}
-
-func (g *gormDBAdapter) DB() (*sql.DB, error) {
-	return g.gormDB.DB()
-}
-
-func NewHealthController(db *gorm.DB, redis *redis.Client) *HealthController {
+func NewHealthController(db *database.DB, redis *redis.Client) *HealthController {
 	return &HealthController{
-		db:    &gormDBAdapter{gormDB: db},
+		db:    db,
 		redis: redis,
 	}
 }
@@ -52,14 +38,7 @@ func (h *HealthController) Check(w http.ResponseWriter, r *http.Request) {
 	overallStatus := "healthy"
 
 	// Check database
-	sqlDB, err := h.db.DB()
-	if err != nil {
-		services["database"] = "error: " + err.Error()
-		overallStatus = "unhealthy"
-	} else if sqlDB == nil {
-		services["database"] = "error: database connection is nil"
-		overallStatus = "unhealthy"
-	} else if err := sqlDB.Ping(); err != nil {
+	if err := h.db.Ping(); err != nil {
 		services["database"] = "error: " + err.Error()
 		overallStatus = "unhealthy"
 	} else {

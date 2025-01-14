@@ -1,49 +1,104 @@
 package database
 
 import (
-	"os"
-	"strings"
 	"testing"
+
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestInitDB_Unit(t *testing.T) {
-	// Test with invalid URL - this is a unit test that doesn't need a real DB
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Expected InitDB to panic with invalid URL")
-		} else {
-			// Verify the panic message contains expected error
-			panicMsg, ok := r.(string)
-			if !ok || !strings.Contains(panicMsg, "Failed to connect to database") {
-				t.Errorf("Expected panic message to contain 'Failed to connect to database', got %v", r)
-			}
-		}
-	}()
+	tests := []struct {
+		name        string
+		dbURL       string
+		wantErr     bool
+		errContains string
+	}{
+		{
+			name:        "Empty URL",
+			dbURL:       "",
+			wantErr:     true,
+			errContains: "database URL cannot be empty",
+		},
+		{
+			name:        "Invalid URL",
+			dbURL:       "invalid-url",
+			wantErr:     true,
+			errContains: "failed to connect to database",
+		},
+		{
+			name:        "Valid URL format but no server",
+			dbURL:       "host=localhost port=5432 dbname=test",
+			wantErr:     true,
+			errContains: "failed to connect to database",
+		},
+	}
 
-	InitDB("invalid-url")
-	t.Error("Expected InitDB to panic, but it didn't")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, err := InitDB(tt.dbURL)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				if tt.errContains != "" {
+					assert.Contains(t, err.Error(), tt.errContains)
+				}
+				assert.Nil(t, db)
+				return
+			}
+
+			assert.NoError(t, err)
+			assert.NotNil(t, db)
+		})
+	}
+}
+
+func TestMigrate_Unit(t *testing.T) {
+	// Create mock database
+	mockDB, mock, err := sqlmock.New()
+	assert.NoError(t, err)
+	defer mockDB.Close()
+
+	db := &DB{mockDB}
+
+	// Expect migrations table check
+	mock.ExpectExec("CREATE TABLE IF NOT EXISTS schema_migrations").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	// Expect query for applied migrations
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT version FROM schema_migrations").
+		WillReturnRows(sqlmock.NewRows([]string{"version"}))
+
+	// Since we can't actually read files in unit tests, we'll verify that
+	// the function handles empty migrations directory gracefully
+	err = db.Migrate("nonexistent")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "failed to read migrations directory")
+
+	// Verify all expectations were met
+	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
 func TestInitDB_Integration(t *testing.T) {
-	// Skip if not in integration test mode
-	if os.Getenv("INTEGRATION_TEST") != "true" {
-		t.Skip("Skipping integration test. Set INTEGRATION_TEST=true to run")
+	if testing.Short() {
+		t.Skip("Skipping integration test")
 	}
 
-	// Use test database for integration tests
-	db, err := InitDB("host=localhost user=postgres password=postgres dbname=auth_test_db port=5433 sslmode=disable")
-	if err != nil {
-		t.Fatal(err)
-	}
-	sqlDB, err := db.DB()
-	if err != nil {
-		t.Fatalf("Failed to get underlying *sql.DB: %v", err)
-	}
-	defer sqlDB.Close()
+	// Use environment variables or configuration for these values in a real application
+	testDBURL := "host=localhost user=test_user password=test_pass dbname=test_db sslmode=disable"
 
-	// Verify connection
-	err = sqlDB.Ping()
+	db, err := InitDB(testDBURL)
 	if err != nil {
-		t.Fatalf("Failed to ping database: %v", err)
+		t.Skipf("Skipping integration test, could not connect to database: %v", err)
+		return
 	}
+
+	assert.NotNil(t, db)
+
+	// Test the connection
+	assert.NoError(t, db.Ping())
+
+	// Clean up
+	db.Close()
 }

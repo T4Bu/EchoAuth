@@ -7,15 +7,15 @@ import (
 )
 
 type RefreshToken struct {
-	ID         uuid.UUID  `json:"id" gorm:"type:uuid;primary_key;default:gen_random_uuid()"`
+	ID         uuid.UUID  `json:"id"`
 	UserID     uint       `json:"user_id"`
-	Token      string     `json:"token" gorm:"unique;not null"`
-	Used       bool       `json:"used" gorm:"default:false"`
+	Token      string     `json:"token"`
+	Used       bool       `json:"used"`
 	RevokedAt  *time.Time `json:"revoked_at"`
 	ExpiresAt  time.Time  `json:"expires_at"`
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
-	PreviousID *uuid.UUID `json:"previous_id" gorm:"type:uuid"`
+	PreviousID *uuid.UUID `json:"previous_id"`
 	DeviceInfo string     `json:"device_info"`
 	IP         string     `json:"ip"`
 }

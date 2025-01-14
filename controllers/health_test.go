@@ -1,10 +1,9 @@
 package controllers
 
 import (
-	"context"
+	"EchoAuth/database"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,140 +11,44 @@ import (
 
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
-	"gorm.io/gorm"
 )
 
-// Mock database
-type mockDB struct {
-	pingErr error
-}
+func TestHealthController_Check(t *testing.T) {
+	// Create a mock DB
+	mockDB, err := sql.Open("postgres", "postgres://fake")
+	assert.NoError(t, err)
+	db := &database.DB{DB: mockDB}
 
-func (m *mockDB) DB() (*sql.DB, error) {
-	// Return a custom error if DB() should fail
-	if m.pingErr != nil && m.pingErr.Error() == "db connection error" {
-		return nil, errors.New("failed to get database instance")
-	}
+	// Create a mock Redis client
+	redisClient := redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+	})
 
-	// For other cases, return nil to simulate a connection error
-	return nil, nil
-}
+	controller := NewHealthController(db, redisClient)
 
-// Mock Redis client
-type mockRedisClient struct {
-	pingErr error
-}
+	// Create a request
+	req, err := http.NewRequest("GET", "/health", nil)
+	assert.NoError(t, err)
 
-func (m *mockRedisClient) Ping(ctx context.Context) *redis.StatusCmd {
-	cmd := redis.NewStatusCmd(ctx)
-	if m.pingErr != nil {
-		cmd.SetErr(m.pingErr)
-	} else {
-		cmd.SetVal("PONG")
-	}
-	return cmd
-}
+	// Create a ResponseRecorder
+	rr := httptest.NewRecorder()
 
-func TestHealthCheck(t *testing.T) {
-	tests := []struct {
-		name            string
-		dbPingErr       error
-		redisPingErr    error
-		wantStatus      int
-		wantHealth      string
-		wantDBStatus    string
-		wantRedisStatus string
-	}{
-		{
-			name:            "All services healthy",
-			dbPingErr:       nil,
-			redisPingErr:    nil,
-			wantStatus:      http.StatusServiceUnavailable,
-			wantHealth:      "unhealthy",
-			wantDBStatus:    "error: database connection is nil",
-			wantRedisStatus: "healthy",
-		},
-		{
-			name:            "Database connection error",
-			dbPingErr:       errors.New("db connection error"),
-			redisPingErr:    nil,
-			wantStatus:      http.StatusServiceUnavailable,
-			wantHealth:      "unhealthy",
-			wantDBStatus:    "error: failed to get database instance",
-			wantRedisStatus: "healthy",
-		},
-		{
-			name:            "Database ping error",
-			dbPingErr:       errors.New("database ping error"),
-			redisPingErr:    nil,
-			wantStatus:      http.StatusServiceUnavailable,
-			wantHealth:      "unhealthy",
-			wantDBStatus:    "error: database connection is nil",
-			wantRedisStatus: "healthy",
-		},
-		{
-			name:            "Redis unhealthy",
-			dbPingErr:       nil,
-			redisPingErr:    errors.New("redis connection error"),
-			wantStatus:      http.StatusServiceUnavailable,
-			wantHealth:      "unhealthy",
-			wantDBStatus:    "error: database connection is nil",
-			wantRedisStatus: "error: redis connection error",
-		},
-		{
-			name:            "All services unhealthy",
-			dbPingErr:       errors.New("database ping error"),
-			redisPingErr:    errors.New("redis connection error"),
-			wantStatus:      http.StatusServiceUnavailable,
-			wantHealth:      "unhealthy",
-			wantDBStatus:    "error: database connection is nil",
-			wantRedisStatus: "error: redis connection error",
-		},
-	}
+	// Call the handler
+	controller.Check(rr, req)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Setup mocks
-			mockDB := &mockDB{pingErr: tt.dbPingErr}
-			mockRedis := &mockRedisClient{pingErr: tt.redisPingErr}
+	// Check the status code
+	assert.Equal(t, http.StatusServiceUnavailable, rr.Code)
 
-			// Create controller with mocks
-			controller := &HealthController{
-				db:    mockDB,
-				redis: mockRedis,
-			}
+	// Parse the response
+	var response HealthResponse
+	err = json.NewDecoder(rr.Body).Decode(&response)
+	assert.NoError(t, err)
 
-			// Create request and response recorder
-			req := httptest.NewRequest(http.MethodGet, "/health", nil)
-			w := httptest.NewRecorder()
-
-			// Call health check
-			controller.Check(w, req)
-
-			// Assert response status code
-			assert.Equal(t, tt.wantStatus, w.Code)
-
-			// Parse response
-			var response HealthResponse
-			err := json.NewDecoder(w.Body).Decode(&response)
-			assert.NoError(t, err)
-
-			// Assert response fields
-			assert.Equal(t, tt.wantHealth, response.Status)
-			assert.Equal(t, tt.wantDBStatus, response.Services["database"])
-			assert.Equal(t, tt.wantRedisStatus, response.Services["redis"])
-			assert.NotZero(t, response.Timestamp)
-			assert.True(t, response.Timestamp.Before(time.Now()))
-		})
-	}
-}
-
-func TestNewHealthController(t *testing.T) {
-	db := &gorm.DB{}
-	redis := &redis.Client{}
-
-	controller := NewHealthController(db, redis)
-
-	assert.NotNil(t, controller)
-	assert.IsType(t, &gormDBAdapter{}, controller.db)
-	assert.Equal(t, redis, controller.redis)
+	// Check the response fields
+	assert.Equal(t, "unhealthy", response.Status)
+	assert.Contains(t, response.Services, "database")
+	assert.Contains(t, response.Services, "redis")
+	assert.Contains(t, response.Services["database"], "error")
+	assert.Contains(t, response.Services["redis"], "error")
+	assert.WithinDuration(t, time.Now(), response.Timestamp, 2*time.Second)
 }

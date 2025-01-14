@@ -9,14 +9,17 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/golang-jwt/jwt"
+	"github.com/redis/go-redis/v9"
 )
 
 var (
 	ErrInvalidCredentials = errors.New("invalid email or password")
 	ErrUserExists         = errors.New("user already exists")
+	ErrTokenBlacklisted   = errors.New("token is blacklisted")
 )
 
 type AuthServiceInterface interface {
@@ -36,9 +39,10 @@ type AuthService struct {
 	refreshExpiry time.Duration
 	jwtSecret     string
 	lockoutSvc    *AccountLockoutService
+	redisClient   *redis.Client
 }
 
-func NewAuthService(userRepo repositories.UserRepository, tokenRepo repositories.TokenRepositoryInterface, cfg *config.Config, lockoutSvc *AccountLockoutService) *AuthService {
+func NewAuthService(userRepo repositories.UserRepository, tokenRepo repositories.TokenRepositoryInterface, cfg *config.Config, lockoutSvc *AccountLockoutService, redisClient *redis.Client) *AuthService {
 	return &AuthService{
 		userRepo:      userRepo,
 		tokenRepo:     tokenRepo,
@@ -46,6 +50,7 @@ func NewAuthService(userRepo repositories.UserRepository, tokenRepo repositories
 		refreshExpiry: 30 * 24 * time.Hour, // 30 days
 		jwtSecret:     cfg.JWTSecret,
 		lockoutSvc:    lockoutSvc,
+		redisClient:   redisClient,
 	}
 }
 
@@ -137,6 +142,16 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (string
 }
 
 func (s *AuthService) ValidateToken(tokenString string) (*models.TokenClaims, error) {
+	// First check if token is blacklisted
+	ctx := context.Background()
+	exists, err := s.redisClient.Exists(ctx, fmt.Sprintf("blacklist:%s", tokenString)).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to check token blacklist: %w", err)
+	}
+	if exists == 1 {
+		return nil, ErrTokenBlacklisted
+	}
+
 	token, err := jwt.ParseWithClaims(tokenString, &models.TokenClaims{}, func(token *jwt.Token) (interface{}, error) {
 		return []byte(s.jwtSecret), nil
 	})
@@ -153,20 +168,28 @@ func (s *AuthService) ValidateToken(tokenString string) (*models.TokenClaims, er
 }
 
 func (s *AuthService) Logout(token string) error {
-	// Validate token first
+	// First validate the token
 	claims, err := s.ValidateToken(token)
 	if err != nil {
 		return err
 	}
 
-	// Find user to get email
-	user, err := s.userRepo.FindByID(claims.UserID)
-	if err != nil {
-		return err
+	// Calculate token expiry
+	expiresAt := time.Unix(claims.ExpiresAt, 0)
+	ttl := time.Until(expiresAt)
+	if ttl <= 0 {
+		return nil // Token is already expired
 	}
 
-	// Reset attempts on logout
-	return s.lockoutSvc.ResetAttempts(context.Background(), user.Email)
+	// Add token to blacklist with TTL matching token expiry
+	ctx := context.Background()
+	key := fmt.Sprintf("blacklist:%s", token)
+	err = s.redisClient.Set(ctx, key, true, ttl).Err()
+	if err != nil {
+		return fmt.Errorf("failed to blacklist token: %w", err)
+	}
+
+	return nil
 }
 
 func (s *AuthService) generateRefreshToken() (string, error) {

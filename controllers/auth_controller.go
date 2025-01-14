@@ -15,6 +15,7 @@ type AuthService interface {
 	Register(email, password, firstName, lastName string) error
 	LoginWithRefresh(email, password, deviceInfo, ip string) (string, string, error)
 	Logout(token string) error
+	LogoutWithRefresh(token string) error
 	ValidateToken(token string) (*models.TokenClaims, error)
 	RefreshToken(refreshToken, deviceInfo, ip string) (string, string, error)
 	GetJWTExpiry() time.Duration
@@ -127,14 +128,36 @@ func (ac *AuthController) Login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (ac *AuthController) Logout(w http.ResponseWriter, r *http.Request) {
+	// Get access token from Authorization header
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" {
+		response.JSONError(w, "Authorization header required", http.StatusUnauthorized)
+		return
+	}
+
+	// Extract token from "Bearer <token>"
+	if len(authHeader) <= 7 || authHeader[:7] != "Bearer " {
+		response.JSONError(w, "Invalid authorization header format", http.StatusUnauthorized)
+		return
+	}
+	accessToken := authHeader[7:]
+
+	// Get refresh token from request body
 	var req RefreshTokenRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		response.JSONError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	if err := ac.authService.Logout(req.RefreshToken); err != nil {
-		response.JSONError(w, "Failed to logout", http.StatusInternalServerError)
+	// Blacklist the access token
+	if err := ac.authService.Logout(accessToken); err != nil {
+		response.JSONError(w, "Failed to blacklist access token", http.StatusInternalServerError)
+		return
+	}
+
+	// Revoke the refresh token
+	if err := ac.authService.LogoutWithRefresh(req.RefreshToken); err != nil {
+		response.JSONError(w, "Failed to revoke refresh token", http.StatusInternalServerError)
 		return
 	}
 

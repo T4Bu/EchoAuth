@@ -1,219 +1,156 @@
 package repositories
 
 import (
+	"EchoAuth/database"
 	"EchoAuth/models"
-	"fmt"
-	"os"
+	"database/sql"
 	"testing"
+	"time"
 
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/stretchr/testify/assert"
 )
 
-var testDB *gorm.DB
-
-func TestMain(m *testing.M) {
-	// Setup test database
-	dsn := "host=localhost user=postgres password=postgres dbname=auth_test_db port=5433 sslmode=disable"
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+func setupTestDB(t *testing.T) (*database.DB, sqlmock.Sqlmock) {
+	mockDB, mock, err := sqlmock.New()
 	if err != nil {
-		fmt.Printf("Failed to connect to test database: %v\n", err)
-		os.Exit(1)
+		t.Fatalf("Failed to create mock database: %v", err)
 	}
 
-	// Migrate the schema
-	err = db.AutoMigrate(&models.User{}, &models.RefreshToken{})
-	if err != nil {
-		fmt.Printf("Failed to migrate test database: %v\n", err)
-		os.Exit(1)
-	}
-
-	testDB = db
-
-	// Run tests
-	code := m.Run()
-
-	// Cleanup
-	sqlDB, err := testDB.DB()
-	if err == nil {
-		sqlDB.Close()
-	}
-
-	os.Exit(code)
+	db := &database.DB{DB: mockDB}
+	return db, mock
 }
 
-func setupTest() (*userRepository, func()) {
-	// Clear the database before each test
-	testDB.Exec("DELETE FROM users")
+func TestUserRepository_Create(t *testing.T) {
+	db, mock := setupTestDB(t)
+	defer db.Close()
 
-	repo := &userRepository{db: testDB}
-
-	return repo, func() {
-		testDB.Exec("DELETE FROM users")
-	}
-}
-
-func TestCreateUser(t *testing.T) {
-	repo, cleanup := setupTest()
-	defer cleanup()
+	repo := NewUserRepository(db)
 
 	user := &models.User{
 		Email:     "test@example.com",
-		Password:  "hashed_password",
-		FirstName: "John",
-		LastName:  "Doe",
+		Password:  "hashedpassword",
+		FirstName: "Test",
+		LastName:  "User",
 	}
+
+	mock.ExpectQuery(`INSERT INTO users`).
+		WithArgs(user.Email, user.Password, user.FirstName, user.LastName,
+			user.PasswordResetToken, user.ResetTokenExpiresAt,
+			sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
 
 	err := repo.Create(user)
-	if err != nil {
-		t.Errorf("Failed to create user: %v", err)
-	}
-
-	if user.ID == 0 {
-		t.Error("Expected user ID to be set after creation")
-	}
+	assert.NoError(t, err)
+	assert.Equal(t, uint(1), user.ID)
+	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestFindByEmail(t *testing.T) {
-	repo, cleanup := setupTest()
-	defer cleanup()
+func TestUserRepository_FindByEmail(t *testing.T) {
+	db, mock := setupTestDB(t)
+	defer db.Close()
 
-	// Create test user
-	user := &models.User{
-		Email:     "test@example.com",
-		Password:  "hashed_password",
-		FirstName: "John",
-		LastName:  "Doe",
-	}
-	repo.Create(user)
+	repo := NewUserRepository(db)
+	email := "test@example.com"
 
-	tests := []struct {
-		name    string
-		email   string
-		wantErr bool
-	}{
-		{
-			name:    "Existing user",
-			email:   "test@example.com",
-			wantErr: false,
-		},
-		{
-			name:    "Non-existent user",
-			email:   "nonexistent@example.com",
-			wantErr: true,
-		},
-	}
+	mock.ExpectQuery(`SELECT .+ FROM users WHERE email = \$1`).
+		WithArgs(email).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "email", "password", "first_name", "last_name",
+			"password_reset_token", "reset_token_expires_at",
+			"created_at", "updated_at", "deleted_at",
+		}).AddRow(
+			1, email, "hashedpassword", "Test", "User",
+			"", time.Time{}, time.Now(), time.Now(), nil,
+		))
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			found, err := repo.FindByEmail(tt.email)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("FindByEmail() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if !tt.wantErr && found.Email != tt.email {
-				t.Errorf("FindByEmail() got = %v, want %v", found.Email, tt.email)
-			}
-		})
-	}
+	user, err := repo.FindByEmail(email)
+	assert.NoError(t, err)
+	assert.NotNil(t, user)
+	assert.Equal(t, email, user.Email)
+	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestFindByID(t *testing.T) {
-	repo, cleanup := setupTest()
-	defer cleanup()
+func TestUserRepository_FindByEmail_NotFound(t *testing.T) {
+	db, mock := setupTestDB(t)
+	defer db.Close()
 
-	// Create test user
-	user := &models.User{
-		Email:     "test@example.com",
-		Password:  "hashed_password",
-		FirstName: "John",
-		LastName:  "Doe",
-	}
-	repo.Create(user)
+	repo := NewUserRepository(db)
+	email := "nonexistent@example.com"
 
-	tests := []struct {
-		name    string
-		id      uint
-		wantErr bool
-	}{
-		{
-			name:    "Existing user",
-			id:      user.ID,
-			wantErr: false,
-		},
-		{
-			name:    "Non-existent user",
-			id:      999,
-			wantErr: true,
-		},
-	}
+	mock.ExpectQuery(`SELECT .+ FROM users WHERE email = \$1`).
+		WithArgs(email).
+		WillReturnError(sql.ErrNoRows)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			found, err := repo.FindByID(tt.id)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("FindByID() error = %v, wantErr %v", err, tt.wantErr)
-				return
-			}
-			if !tt.wantErr && found.ID != tt.id {
-				t.Errorf("FindByID() got = %v, want %v", found.ID, tt.id)
-			}
-		})
-	}
+	user, err := repo.FindByEmail(email)
+	assert.Error(t, err)
+	assert.Equal(t, ErrNotFound, err)
+	assert.Nil(t, user)
+	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestUpdateUser(t *testing.T) {
-	repo, cleanup := setupTest()
-	defer cleanup()
+func TestUserRepository_Update(t *testing.T) {
+	db, mock := setupTestDB(t)
+	defer db.Close()
 
-	// Create test user
+	repo := NewUserRepository(db)
 	user := &models.User{
+		ID:        1,
 		Email:     "test@example.com",
-		Password:  "hashed_password",
-		FirstName: "John",
-		LastName:  "Doe",
+		FirstName: "Updated",
+		LastName:  "User",
 	}
-	repo.Create(user)
 
-	// Update user
-	user.FirstName = "Jane"
+	mock.ExpectExec(`UPDATE users SET .+ WHERE id = \$8`).
+		WithArgs(
+			user.Email, user.Password, user.FirstName, user.LastName,
+			user.PasswordResetToken, user.ResetTokenExpiresAt,
+			sqlmock.AnyArg(), user.ID,
+		).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
 	err := repo.Update(user)
-	if err != nil {
-		t.Errorf("Failed to update user: %v", err)
-	}
-
-	// Verify update
-	updated, err := repo.FindByID(user.ID)
-	if err != nil {
-		t.Errorf("Failed to find updated user: %v", err)
-	}
-	if updated.FirstName != "Jane" {
-		t.Errorf("Update failed: expected FirstName = Jane, got %s", updated.FirstName)
-	}
+	assert.NoError(t, err)
+	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
-func TestDeleteUser(t *testing.T) {
-	repo, cleanup := setupTest()
-	defer cleanup()
+func TestUserRepository_Delete(t *testing.T) {
+	db, mock := setupTestDB(t)
+	defer db.Close()
 
-	// Create test user
-	user := &models.User{
-		Email:     "test@example.com",
-		Password:  "hashed_password",
-		FirstName: "John",
-		LastName:  "Doe",
-	}
-	repo.Create(user)
+	repo := NewUserRepository(db)
+	userID := uint(1)
 
-	// Delete user
-	err := repo.Delete(user.ID)
-	if err != nil {
-		t.Errorf("Failed to delete user: %v", err)
-	}
+	mock.ExpectExec(`UPDATE users SET deleted_at = \$1 WHERE id = \$2`).
+		WithArgs(sqlmock.AnyArg(), userID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	// Verify deletion
-	_, err = repo.FindByID(user.ID)
-	if err == nil {
-		t.Error("Expected error when finding deleted user")
-	}
+	err := repo.Delete(userID)
+	assert.NoError(t, err)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestUserRepository_FindByResetToken(t *testing.T) {
+	db, mock := setupTestDB(t)
+	defer db.Close()
+
+	repo := NewUserRepository(db)
+	token := "reset-token"
+
+	mock.ExpectQuery(`SELECT .+ FROM users WHERE password_reset_token = \$1`).
+		WithArgs(token).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "email", "password", "first_name", "last_name",
+			"password_reset_token", "reset_token_expires_at",
+			"created_at", "updated_at", "deleted_at",
+		}).AddRow(
+			1, "test@example.com", "hashedpassword", "Test", "User",
+			token, time.Now().Add(time.Hour), time.Now(), time.Now(), nil,
+		))
+
+	user, err := repo.FindByResetToken(token)
+	assert.NoError(t, err)
+	assert.NotNil(t, user)
+	assert.Equal(t, token, user.PasswordResetToken)
+	assert.NoError(t, mock.ExpectationsWereMet())
 }

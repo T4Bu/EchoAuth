@@ -3,13 +3,19 @@ package main
 import (
 	"EchoAuth/config"
 	"EchoAuth/database"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
 func setupTestDB(t *testing.T) *database.DB {
-	dsn := "host=localhost user=test_user password=test_pass dbname=test_db sslmode=disable"
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		t.Skip("Skipping test, DATABASE_URL not set")
+		return nil
+	}
+
 	db, err := database.InitDB(dsn)
 	if err != nil {
 		t.Skipf("Skipping test, could not connect to database: %v", err)

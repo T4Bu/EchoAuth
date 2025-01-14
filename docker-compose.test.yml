@@ -1,22 +1,65 @@
 version: '3.8'
 services:
+  test:
+    image: golang:1.22-alpine
+    volumes:
+      - .:/app
+      - go-mod-cache:/go/pkg/mod
+    working_dir: /app
+    environment:
+      - DATABASE_URL=postgres://test_user:test_password@test-db:5432/auth_test_db?sslmode=disable
+      - REDIS_ADDR=redis:6379
+      - ENV=test
+      - JWT_SECRET=test-secret
+    depends_on:
+      test-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - test-network
+    command: sh -c "sleep 5 && go test -v -cover ./..."
+
   test-db:
-    image: postgres:14
+    image: postgres:14-alpine
     environment:
       POSTGRES_USER: test_user
       POSTGRES_PASSWORD: test_password
       POSTGRES_DB: auth_test_db
-    ports:
-      - "5433:5432"  # Using different port to avoid conflicts
+    tmpfs:
+      - /var/lib/postgresql/data
+    networks:
+      - test-network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U test_user"]
       interval: 5s
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:7-alpine
+    tmpfs:
+      - /data
+    networks:
+      - test-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   mailhog:
     image: mailhog/mailhog:latest
-    platform: linux/amd64  # Specified platform for M1/M2 Mac compatibility
+    platform: linux/amd64
     ports:
-      - "1025:1025"  # SMTP server port
-      - "8025:8025"  # Web UI port 
+      - "1025:1025"
+      - "8025:8025"
+    networks:
+      - test-network
+
+networks:
+  test-network:
+    driver: bridge
+
+volumes:
+  go-mod-cache: 
